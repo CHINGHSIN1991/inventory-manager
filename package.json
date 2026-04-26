@@ -13,6 +13,8 @@
     "@ark-ui/solid": "^5.36.0",
     "@solidjs/router": "^0.16.1",
     "@supabase/supabase-js": "^2.103.0",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.7",
     "solid-js": "^1.9.12"
   },
   "devDependencies": {
