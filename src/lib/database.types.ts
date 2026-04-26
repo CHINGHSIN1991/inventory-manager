@@ -6,7 +6,7 @@ export type Database = {
           id: string;
           email: string;
           display_name: string | null;
-          role: "admin" | "warehouse" | "viewer";
+          role: "admin" | "warehouse" | "viewer" | "partner";
           created_at: string;
           updated_at: string;
         };
@@ -14,7 +14,7 @@ export type Database = {
           id: string;
           email: string;
           display_name?: string | null;
-          role?: "admin" | "warehouse" | "viewer";
+          role?: "admin" | "warehouse" | "viewer" | "partner";
           created_at?: string;
           updated_at?: string;
         };
@@ -22,7 +22,7 @@ export type Database = {
           id?: string;
           email?: string;
           display_name?: string | null;
-          role?: "admin" | "warehouse" | "viewer";
+          role?: "admin" | "warehouse" | "viewer" | "partner";
           created_at?: string;
           updated_at?: string;
         };
@@ -76,6 +76,30 @@ export type Database = {
         };
         Relationships: [];
       };
+      partner_products: {
+        Row: {
+          id: string;
+          partner_id: string;
+          product_id: string;
+          commission_rate: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          partner_id: string;
+          product_id: string;
+          commission_rate?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          partner_id?: string;
+          product_id?: string;
+          commission_rate?: number;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       stock_movements: {
         Row: {
           id: string;
@@ -118,4 +142,6 @@ export type ProductInsert = Database["public"]["Tables"]["products"]["Insert"];
 export type ProductUpdate = Database["public"]["Tables"]["products"]["Update"];
 export type StockMovement = Database["public"]["Tables"]["stock_movements"]["Row"];
 export type StockMovementInsert = Database["public"]["Tables"]["stock_movements"]["Insert"];
+export type PartnerProduct = Database["public"]["Tables"]["partner_products"]["Row"];
+export type PartnerProductInsert = Database["public"]["Tables"]["partner_products"]["Insert"];
 export type UserRole = Profile["role"];

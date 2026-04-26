@@ -16,6 +16,7 @@ export function AppLayout(props: ParentProps) {
     const r = profile()?.role;
     if (r === "admin") return "管理員";
     if (r === "warehouse") return "倉管";
+    if (r === "partner") return "合作廠商";
     return "檢視者";
   };
 
@@ -49,9 +50,8 @@ export function AppLayout(props: ParentProps) {
         <nav class={css({ display: "flex", flexDir: "column", gap: "1", flex: 1 })}>
           <NavLink href="/">首頁總覽</NavLink>
           <NavLink href="/products">商品管理</NavLink>
-          <NavLink href="/stock/in">進貨</NavLink>
-          <NavLink href="/stock/out">出貨</NavLink>
           <NavLink href="/stock/history">異動紀錄</NavLink>
+          <NavLink href="/commission">分潤管理</NavLink>
         </nav>
         <div
           class={css({

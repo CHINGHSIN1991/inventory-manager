@@ -7,9 +7,8 @@ import { RegisterPage } from "./pages/RegisterPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ProductListPage } from "./pages/ProductListPage";
 import { ProductFormPage } from "./pages/ProductFormPage";
-import { StockInPage } from "./pages/StockInPage";
-import { StockOutPage } from "./pages/StockOutPage";
 import { StockHistoryPage } from "./pages/StockHistoryPage";
+import { CommissionPage } from "./pages/CommissionPage";
 
 export default function App() {
   return (
@@ -29,9 +28,8 @@ export default function App() {
           <Route path="/products" component={ProductListPage} />
           <Route path="/products/new" component={ProductFormPage} />
           <Route path="/products/:id/edit" component={ProductFormPage} />
-          <Route path="/stock/in" component={StockInPage} />
-          <Route path="/stock/out" component={StockOutPage} />
           <Route path="/stock/history" component={StockHistoryPage} />
+          <Route path="/commission" component={CommissionPage} />
         </Route>
       </Router>
     </AuthProvider>

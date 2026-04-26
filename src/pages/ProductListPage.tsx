@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import type { Product } from "../lib/database.types";
 import { css } from "../../styled-system/css";
+import { StockDialog } from "../components/StockDialog";
 
 async function fetchProducts(search: string): Promise<Product[]> {
   let query = supabase
@@ -24,6 +25,11 @@ export function ProductListPage() {
   const { profile } = useAuth();
   const [search, setSearch] = createSignal("");
   const [products, { refetch }] = createResource(search, fetchProducts);
+
+  const [stockDialog, setStockDialog] = createSignal<{
+    type: "in" | "out";
+    product: Product;
+  } | null>(null);
 
   const canEdit = () => {
     const role = profile()?.role;
@@ -152,11 +158,39 @@ export function ProductListPage() {
                       </td>
                       <Show when={canEdit()}>
                         <td class={td}>
-                          <div class={css({ display: "flex", gap: "2" })}>
+                          <div class={css({ display: "flex", gap: "2", flexWrap: "wrap" })}>
+                            <button
+                              onClick={() => setStockDialog({ type: "in", product })}
+                              class={css({
+                                color: "blue.600",
+                                fontSize: "sm",
+                                bg: "transparent",
+                                border: "none",
+                                cursor: "pointer",
+                                p: "0",
+                                _hover: { textDecoration: "underline" },
+                              })}
+                            >
+                              進貨
+                            </button>
+                            <button
+                              onClick={() => setStockDialog({ type: "out", product })}
+                              class={css({
+                                color: "orange.600",
+                                fontSize: "sm",
+                                bg: "transparent",
+                                border: "none",
+                                cursor: "pointer",
+                                p: "0",
+                                _hover: { textDecoration: "underline" },
+                              })}
+                            >
+                              出貨
+                            </button>
                             <A
                               href={`/products/${product.id}/edit`}
                               class={css({
-                                color: "blue.600",
+                                color: "gray.600",
                                 fontSize: "sm",
                                 _hover: { textDecoration: "underline" },
                               })}
@@ -189,6 +223,17 @@ export function ProductListPage() {
             </table>
           </div>
         </Show>
+      </Show>
+
+      <Show when={stockDialog()}>
+        {(dialog) => (
+          <StockDialog
+            type={dialog().type}
+            product={dialog().product}
+            onClose={() => setStockDialog(null)}
+            onSuccess={() => refetch()}
+          />
+        )}
       </Show>
     </div>
   );
