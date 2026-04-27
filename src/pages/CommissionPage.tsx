@@ -83,7 +83,7 @@ async function fetchOutMovements(
 // ─── Main component ──────────────────────────────────────────────────────────
 
 export function CommissionPage() {
-  const { profile } = useAuth();
+  const { profile, session } = useAuth();
 
   const isAdmin = () => profile()?.role === "admin";
   const isPartner = () => profile()?.role === "partner";
@@ -219,43 +219,33 @@ export function CommissionPage() {
     setNewPartnerSuccess("");
     setNewPartnerSubmitting(true);
 
-    const { error } = await supabase.auth.admin.createUser({
-      email: newPartnerEmail(),
-      password: Math.random().toString(36).slice(-12),
-      email_confirm: true,
-      user_metadata: { display_name: newPartnerName() },
+    const rawUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_PROJECT_ID;
+    const supabaseUrl = rawUrl.startsWith("http") || rawUrl.includes(".")
+      ? rawUrl
+      : `https://${rawUrl}.supabase.co`;
+    const token = session()?.access_token;
+
+    const res = await fetch(`${supabaseUrl}/functions/v1/invite-partner`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        email: newPartnerEmail(),
+        displayName: newPartnerName(),
+      }),
     });
 
-    if (error) {
-      // Fallback: try signUp (works if admin can't use admin API from client)
-      const { error: signupErr } = await supabase.auth.signUp({
-        email: newPartnerEmail(),
-        password: Math.random().toString(36).slice(-12),
-        options: { data: { display_name: newPartnerName() } },
-      });
-      if (signupErr) {
-        setNewPartnerError(signupErr.message);
-        setNewPartnerSubmitting(false);
-        return;
-      }
+    const json = await res.json() as { success?: boolean; error?: string };
+
+    if (!res.ok || json.error) {
+      setNewPartnerError(json.error ?? "發生未知錯誤");
+      setNewPartnerSubmitting(false);
+      return;
     }
 
-    // Set role to partner — wait briefly for trigger to create profile
-    await new Promise((r) => setTimeout(r, 1000));
-    const { data: profileData } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("email", newPartnerEmail())
-      .maybeSingle();
-
-    if (profileData) {
-      await supabase
-        .from("profiles")
-        .update({ role: "partner" })
-        .eq("id", profileData.id);
-    }
-
-    setNewPartnerSuccess(`廠商帳號已建立：${newPartnerEmail()}`);
+    setNewPartnerSuccess(`邀請信已寄出至：${newPartnerEmail()}`);
     setNewPartnerEmail("");
     setNewPartnerName("");
     setNewPartnerSubmitting(false);

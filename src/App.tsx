@@ -4,6 +4,8 @@ import { AuthGuard } from "./components/AuthGuard";
 import { AppLayout } from "./components/AppLayout";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
+import { SetPasswordPage } from "./pages/SetPasswordPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ProductListPage } from "./pages/ProductListPage";
 import { ProductFormPage } from "./pages/ProductFormPage";
@@ -16,6 +18,8 @@ export default function App() {
       <Router>
         <Route path="/login" component={LoginPage} />
         <Route path="/register" component={RegisterPage} />
+        <Route path="/forgot-password" component={ForgotPasswordPage} />
+        <Route path="/set-password" component={SetPasswordPage} />
         <Route
           path="/"
           component={(props) => (
