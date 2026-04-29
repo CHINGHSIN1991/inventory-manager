@@ -52,6 +52,9 @@ export function AppLayout(props: ParentProps) {
           <NavLink href="/products">商品管理</NavLink>
           <NavLink href="/stock/history">異動紀錄</NavLink>
           <NavLink href="/commission">分潤管理</NavLink>
+          <Show when={profile()?.role === "admin"}>
+            <NavLink href="/admin/users">帳號管理</NavLink>
+          </Show>
         </nav>
         <div
           class={css({

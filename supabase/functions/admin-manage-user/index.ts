@@ -12,10 +12,8 @@ Deno.serve(async (req) => {
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    // Use a non-SUPABASE_ prefixed secret name for function secrets
     const serviceRoleKey = Deno.env.get("SERVICE_ROLE_KEY")!;
 
-    // Admin client (service role) — used for privileged operations
     const adminClient = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
@@ -51,55 +49,40 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Parse request body
-    const { email, displayName } = await req.json() as { email: string; displayName: string };
+    const { action, userId } = await req.json() as { action: string; userId: string };
 
-    if (!email || !displayName) {
-      return new Response(JSON.stringify({ error: "email 與 displayName 為必填" }), {
+    if (!action || !userId) {
+      return new Response(JSON.stringify({ error: "action 與 userId 為必填" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Send invite email (service role required)
-    const redirectTo = `${req.headers.get("origin") ?? supabaseUrl}/set-password`;
-    const { data: inviteData, error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(
-      email,
-      {
-        data: { display_name: displayName },
-        redirectTo,
+    // Prevent admin from deleting themselves
+    if (userId === caller.id) {
+      return new Response(JSON.stringify({ error: "不可對自己的帳號執行此操作" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (action === "delete") {
+      const { error: deleteErr } = await adminClient.auth.admin.deleteUser(userId);
+      if (deleteErr) {
+        return new Response(JSON.stringify({ error: deleteErr.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
-    );
-
-    if (inviteErr) {
-      const msg = inviteErr.message.toLowerCase().includes("already registered")
-        ? "此 Email 已經存在"
-        : inviteErr.message;
-      return new Response(JSON.stringify({ error: msg }), {
-        status: 422,
+      // profiles row is CASCADE deleted via FK constraint
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Update profile: set role=partner and display_name
-    // The on_auth_user_created trigger already created the profile with role='viewer';
-    // we now update it to 'partner'. Service role bypasses RLS.
-    const userId = inviteData.user.id;
-    const { error: updateErr } = await adminClient
-      .from("profiles")
-      .update({ display_name: displayName, role: "partner" })
-      .eq("id", userId);
-
-    if (updateErr) {
-      console.error("Profile role update failed:", updateErr);
-      return new Response(JSON.stringify({ error: `邀請已寄出，但角色設定失敗：${updateErr.message}` }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    return new Response(JSON.stringify({ success: true }), {
-      status: 200,
+    return new Response(JSON.stringify({ error: `未知的 action: ${action}` }), {
+      status: 400,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {

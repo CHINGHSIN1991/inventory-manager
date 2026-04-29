@@ -7,6 +7,7 @@ export type Database = {
           email: string;
           display_name: string | null;
           role: "admin" | "warehouse" | "viewer" | "partner";
+          is_active: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -15,6 +16,7 @@ export type Database = {
           email: string;
           display_name?: string | null;
           role?: "admin" | "warehouse" | "viewer" | "partner";
+          is_active?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -23,6 +25,7 @@ export type Database = {
           email?: string;
           display_name?: string | null;
           role?: "admin" | "warehouse" | "viewer" | "partner";
+          is_active?: boolean;
           created_at?: string;
           updated_at?: string;
         };

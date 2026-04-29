@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   email text NOT NULL,
   display_name text,
   role text NOT NULL DEFAULT 'viewer' CHECK (role in ('admin', 'warehouse', 'viewer', 'partner')),
+  is_active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -240,3 +241,9 @@ create policy "Admin/warehouse can delete product images"
     bucket_id = 'product-images'
     and public.get_user_role() in ('admin', 'warehouse')
   );
+
+-- ============================================
+-- Migration: add is_active to profiles (for existing databases)
+-- ============================================
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;

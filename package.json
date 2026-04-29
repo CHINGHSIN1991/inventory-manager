@@ -21,6 +21,7 @@
     "@pandacss/dev": "^1.9.1",
     "@types/node": "^24.12.2",
     "postcss": "^8.5.9",
+    "supabase": "^2.95.6",
     "typescript": "~6.0.2",
     "vite": "^8.0.4",
     "vite-plugin-solid": "^2.11.12"
