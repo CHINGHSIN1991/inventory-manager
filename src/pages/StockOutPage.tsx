@@ -4,6 +4,32 @@ import { useAuth } from "../contexts/AuthContext";
 import type { Product } from "../lib/database.types";
 import { css } from "../../styled-system/css";
 
+interface ActiveProject {
+  id: string;
+  name: string;
+  partnerName: string;
+}
+
+async function fetchActiveProjects(): Promise<ActiveProject[]> {
+  const today = new Date().toISOString().slice(0, 10);
+  const { data, error } = await supabase
+    .from("collaboration_projects")
+    .select("id, name, profiles(display_name, email)")
+    .eq("status", "active")
+    .or(`end_date.is.null,end_date.gte.${today}`)
+    .order("name");
+  if (error) throw error;
+  return ((data ?? []) as unknown as Array<{
+    id: string;
+    name: string;
+    profiles: { display_name: string | null; email: string } | null;
+  }>).map((p) => ({
+    id: p.id,
+    name: p.name,
+    partnerName: p.profiles?.display_name ?? p.profiles?.email ?? "",
+  }));
+}
+
 async function fetchActiveProducts(): Promise<Product[]> {
   const { data, error } = await supabase
     .from("products")
@@ -19,7 +45,9 @@ async function fetchActiveProducts(): Promise<Product[]> {
 export function StockOutPage() {
   const { profile } = useAuth();
   const [products, { refetch }] = createResource(fetchActiveProducts);
+  const [activeProjects] = createResource(fetchActiveProjects);
   const [productId, setProductId] = createSignal("");
+  const [projectId, setProjectId] = createSignal("");
   const [quantity, setQuantity] = createSignal(1);
   const [note, setNote] = createSignal("");
   const [error, setError] = createSignal("");
@@ -52,6 +80,7 @@ export function StockOutPage() {
       quantity: quantity(),
       note: note() || null,
       created_by: profile()!.id,
+      project_id: projectId() || null,
     });
 
     if (err) {
@@ -61,6 +90,7 @@ export function StockOutPage() {
         `成功出貨：${product?.name ?? "商品"} × ${quantity()}`
       );
       setProductId("");
+      setProjectId("");
       setQuantity(1);
       setNote("");
       refetch();
@@ -111,6 +141,26 @@ export function StockOutPage() {
             })}
           >
             目前庫存：{selectedProduct()!.quantity} {selectedProduct()!.unit}
+          </div>
+        </Show>
+
+        <Show when={(activeProjects() ?? []).length > 0}>
+          <div class={fieldGroup}>
+            <label class={label}>合作專案（選填）</label>
+            <select
+              value={projectId()}
+              onChange={(e) => setProjectId(e.currentTarget.value)}
+              class={select}
+            >
+              <option value="">-- 不指定專案 --</option>
+              <For each={activeProjects()}>
+                {(proj) => (
+                  <option value={proj.id}>
+                    {proj.partnerName ? `${proj.partnerName} - ` : ""}{proj.name}
+                  </option>
+                )}
+              </For>
+            </select>
           </div>
         </Show>
 

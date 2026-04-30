@@ -247,3 +247,88 @@ create policy "Admin/warehouse can delete product images"
 -- ============================================
 ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
+
+-- ============================================
+-- Collaboration Projects (replaces partner_products)
+-- ============================================
+
+-- Drop partner_products (superseded by collaboration_project_products)
+DROP TABLE IF EXISTS public.partner_products CASCADE;
+
+-- Collaboration projects
+CREATE TABLE IF NOT EXISTS public.collaboration_projects (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  partner_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  start_date date NOT NULL,
+  end_date date,
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed')),
+  note text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Per-project product commission rates
+CREATE TABLE IF NOT EXISTS public.collaboration_project_products (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES public.collaboration_projects(id) ON DELETE CASCADE,
+  product_id uuid NOT NULL REFERENCES public.products(id) ON DELETE CASCADE,
+  commission_rate numeric(5, 4) NOT NULL DEFAULT 0.1 CHECK (commission_rate >= 0 AND commission_rate <= 1),
+  UNIQUE (project_id, product_id)
+);
+
+-- Add project_id to stock_movements
+ALTER TABLE public.stock_movements
+  ADD COLUMN IF NOT EXISTS project_id uuid REFERENCES public.collaboration_projects(id) ON DELETE SET NULL;
+
+-- Enable RLS
+ALTER TABLE public.collaboration_projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.collaboration_project_products ENABLE ROW LEVEL SECURITY;
+
+-- collaboration_projects: admin + warehouse can SELECT all
+DROP POLICY IF EXISTS "Admin and warehouse can view collaboration_projects" ON public.collaboration_projects;
+CREATE POLICY "Admin and warehouse can view collaboration_projects"
+  ON public.collaboration_projects FOR SELECT
+  TO authenticated
+  USING (public.get_user_role() IN ('admin', 'warehouse'));
+
+-- collaboration_projects: admin can INSERT/UPDATE/DELETE (ALL also covers SELECT)
+DROP POLICY IF EXISTS "Admin can manage collaboration_projects" ON public.collaboration_projects;
+CREATE POLICY "Admin can manage collaboration_projects"
+  ON public.collaboration_projects FOR ALL
+  TO authenticated
+  USING (public.get_user_role() = 'admin')
+  WITH CHECK (public.get_user_role() = 'admin');
+
+-- collaboration_projects: partner can SELECT own
+DROP POLICY IF EXISTS "Partner can view own collaboration_projects" ON public.collaboration_projects;
+CREATE POLICY "Partner can view own collaboration_projects"
+  ON public.collaboration_projects FOR SELECT
+  TO authenticated
+  USING (partner_id = auth.uid());
+
+-- collaboration_project_products: admin + warehouse can SELECT
+DROP POLICY IF EXISTS "Admin and warehouse can view collaboration_project_products" ON public.collaboration_project_products;
+CREATE POLICY "Admin and warehouse can view collaboration_project_products"
+  ON public.collaboration_project_products FOR SELECT
+  TO authenticated
+  USING (public.get_user_role() IN ('admin', 'warehouse'));
+
+-- collaboration_project_products: admin can manage
+DROP POLICY IF EXISTS "Admin can manage collaboration_project_products" ON public.collaboration_project_products;
+CREATE POLICY "Admin can manage collaboration_project_products"
+  ON public.collaboration_project_products FOR ALL
+  TO authenticated
+  USING (public.get_user_role() = 'admin')
+  WITH CHECK (public.get_user_role() = 'admin');
+
+-- collaboration_project_products: partner can SELECT products of own projects
+DROP POLICY IF EXISTS "Partner can view own collaboration_project_products" ON public.collaboration_project_products;
+CREATE POLICY "Partner can view own collaboration_project_products"
+  ON public.collaboration_project_products FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.collaboration_projects cp
+      WHERE cp.id = project_id AND cp.partner_id = auth.uid()
+    )
+  );

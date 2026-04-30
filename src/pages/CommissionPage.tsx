@@ -1,36 +1,46 @@
 import { createSignal, createResource, For, Show, createMemo } from "solid-js";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
-import type { Profile, Product, PartnerProductInsert } from "../lib/database.types";
+import type {
+  Profile,
+  Product,
+  CollaborationProjectInsert,
+  CollaborationProjectProductInsert,
+} from "../lib/database.types";
 import { css } from "../../styled-system/css";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────
 
-interface PartnerProductRow {
+interface ProjectRow {
   id: string;
+  name: string;
   partner_id: string;
-  product_id: string;
-  commission_rate: number;
-  products: { id: string; sku: string; name: string; unit: string; unit_price: number } | null;
+  start_date: string;
+  end_date: string | null;
+  status: "active" | "closed";
+  note: string | null;
+  created_at: string;
+  profiles: { display_name: string | null; email: string } | null;
 }
 
-interface StockMovementRow {
+interface ProjProductRow {
+  id: string;
+  project_id: string;
+  product_id: string;
+  commission_rate: number;
+  products: {
+    id: string;
+    sku: string;
+    name: string;
+    unit: string;
+    unit_price: number;
+  } | null;
+}
+
+interface ProjMovementRow {
   id: string;
   product_id: string;
   quantity: number;
-  created_at: string;
-}
-
-interface CommissionLine {
-  sku: string;
-  name: string;
-  unit: string;
-  unit_price: number;
-  out_qty: number;
-  commission_rate: number;
-  subtotal: number;
 }
 
 // ─── Data fetchers ───────────────────────────────────────────────────────────
@@ -49,33 +59,46 @@ async function fetchAllProducts(): Promise<Product[]> {
   const { data, error } = await supabase
     .from("products")
     .select("*")
+    .eq("is_active", true)
     .order("name");
   if (error) throw error;
   return data ?? [];
 }
 
-async function fetchPartnerProducts(partnerId: string): Promise<PartnerProductRow[]> {
+async function fetchAllProjects(): Promise<ProjectRow[]> {
   const { data, error } = await supabase
-    .from("partner_products")
-    .select("id, partner_id, product_id, commission_rate, products(id, sku, name, unit, unit_price)")
-    .eq("partner_id", partnerId);
+    .from("collaboration_projects")
+    .select("*, profiles(display_name, email)")
+    .order("created_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []) as PartnerProductRow[];
+  return (data ?? []) as ProjectRow[];
 }
 
-async function fetchOutMovements(
-  productIds: string[],
-  from: string,
-  to: string
-): Promise<StockMovementRow[]> {
-  if (!productIds.length) return [];
+async function fetchMyProjects(partnerId: string): Promise<ProjectRow[]> {
+  const { data, error } = await supabase
+    .from("collaboration_projects")
+    .select("*, profiles(display_name, email)")
+    .eq("partner_id", partnerId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as ProjectRow[];
+}
+
+async function fetchProjectProducts(projectId: string): Promise<ProjProductRow[]> {
+  const { data, error } = await supabase
+    .from("collaboration_project_products")
+    .select("*, products(id, sku, name, unit, unit_price)")
+    .eq("project_id", projectId);
+  if (error) throw error;
+  return (data ?? []) as ProjProductRow[];
+}
+
+async function fetchProjectMovements(projectId: string): Promise<ProjMovementRow[]> {
   const { data, error } = await supabase
     .from("stock_movements")
-    .select("id, product_id, quantity, created_at")
-    .eq("type", "out")
-    .in("product_id", productIds)
-    .gte("created_at", from + "T00:00:00Z")
-    .lte("created_at", to + "T23:59:59Z");
+    .select("id, product_id, quantity")
+    .eq("project_id", projectId)
+    .eq("type", "out");
   if (error) throw error;
   return data ?? [];
 }
@@ -86,143 +109,111 @@ export function CommissionPage() {
   const { profile, session } = useAuth();
 
   const isAdmin = () => profile()?.role === "admin";
-  const isPartner = () => profile()?.role === "partner";
-
-  // date range
   const today = new Date().toISOString().slice(0, 10);
-  const firstOfMonth = today.slice(0, 7) + "-01";
-  const [dateFrom, setDateFrom] = createSignal(firstOfMonth);
-  const [dateTo, setDateTo] = createSignal(today);
 
-  // admin — selected partner
-  const [selectedPartnerId, setSelectedPartnerId] = createSignal<string>("");
+  // ── Admin panel mode ────────────────────────────────────────────
+  const [panelMode, setPanelMode] = createSignal<"view" | "invite" | "new-project">("view");
 
-  // admin management panel state
-  const [mgmtMode, setMgmtMode] = createSignal<"view" | "add-partner" | "add-product">("view");
-  const [newPartnerEmail, setNewPartnerEmail] = createSignal("");
-  const [newPartnerName, setNewPartnerName] = createSignal("");
-  const [newPartnerError, setNewPartnerError] = createSignal("");
-  const [newPartnerSuccess, setNewPartnerSuccess] = createSignal("");
-  const [newPartnerSubmitting, setNewPartnerSubmitting] = createSignal(false);
+  // Invite partner form
+  const [inviteEmail, setInviteEmail] = createSignal("");
+  const [inviteName, setInviteName] = createSignal("");
+  const [inviteError, setInviteError] = createSignal("");
+  const [inviteSuccess, setInviteSuccess] = createSignal("");
+  const [inviteSubmitting, setInviteSubmitting] = createSignal(false);
 
-  const [addProductPartnerId, setAddProductPartnerId] = createSignal("");
-  const [addProductId, setAddProductId] = createSignal("");
-  const [addProductRate, setAddProductRate] = createSignal(10); // percent
-  const [addProductError, setAddProductError] = createSignal("");
-  const [addProductSuccess, setAddProductSuccess] = createSignal("");
-  const [addProductSubmitting, setAddProductSubmitting] = createSignal(false);
+  // New project form
+  const [newProjName, setNewProjName] = createSignal("");
+  const [newProjPartnerId, setNewProjPartnerId] = createSignal("");
+  const [newProjStartDate, setNewProjStartDate] = createSignal(today);
+  const [newProjEndDate, setNewProjEndDate] = createSignal("");
+  const [newProjNote, setNewProjNote] = createSignal("");
+  const [newProjError, setNewProjError] = createSignal("");
+  const [newProjSubmitting, setNewProjSubmitting] = createSignal(false);
 
-  // data resources
-  const [partners, { refetch: refetchPartners }] = createResource(() => isAdmin(), (isA) =>
-    isA ? fetchPartners() : Promise.resolve([] as Profile[])
-  );
-  const [allProducts] = createResource(() => isAdmin(), (isA) =>
-    isA ? fetchAllProducts() : Promise.resolve([] as Product[])
-  );
+  // Expanded project
+  const [expandedProjectId, setExpandedProjectId] = createSignal<string | null>(null);
 
-  // effective partner id (admin chooses; partner is themselves)
-  const effectivePartnerId = () =>
-    isAdmin() ? selectedPartnerId() : (profile()?.id ?? "");
+  // Add product to expanded project form
+  const [showAddProd, setShowAddProd] = createSignal(false);
+  const [addProdProductId, setAddProdProductId] = createSignal("");
+  const [addProdRate, setAddProdRate] = createSignal(10);
+  const [addProdError, setAddProdError] = createSignal("");
+  const [addProdSuccess, setAddProdSuccess] = createSignal("");
+  const [addProdSubmitting, setAddProdSubmitting] = createSignal(false);
 
-  const [partnerProducts, { refetch: refetchPartnerProducts }] = createResource(
-    effectivePartnerId,
-    (id) => (id ? fetchPartnerProducts(id) : Promise.resolve([] as PartnerProductRow[]))
+  // ── Resources ──────────────────────────────────────────────────
+  const [partners, { refetch: refetchPartners }] = createResource(
+    () => isAdmin(),
+    (isA) => (isA ? fetchPartners() : Promise.resolve([] as Profile[]))
   );
 
-  const productIds = createMemo(() =>
-    (partnerProducts() ?? []).map((pp) => pp.product_id)
+  const [allProducts] = createResource(
+    () => isAdmin(),
+    (isA) => (isA ? fetchAllProducts() : Promise.resolve([] as Product[]))
   );
 
-  // trigger movements fetch when productIds + dates change
-  const movementKey = createMemo(() => ({
-    ids: productIds(),
-    from: dateFrom(),
-    to: dateTo(),
+  const projectsKey = createMemo(() => ({
+    isA: isAdmin(),
+    pid: profile()?.id ?? "",
   }));
 
-  const [movements] = createResource(movementKey, ({ ids, from, to }) =>
-    fetchOutMovements(ids, from, to)
+  const [projects, { refetch: refetchProjects }] = createResource(
+    projectsKey,
+    ({ isA, pid }) => {
+      if (isA) return fetchAllProjects();
+      if (pid) return fetchMyProjects(pid);
+      return Promise.resolve([] as ProjectRow[]);
+    }
   );
 
-  // ── commission lines calculation ────────────────────────────────────────
-  const commissionLines = createMemo<CommissionLine[]>(() => {
-    const pps = partnerProducts() ?? [];
-    const mvs = movements() ?? [];
-    return pps
-      .map((pp) => {
-        if (!pp.products) return null;
-        const qty = mvs
-          .filter((m) => m.product_id === pp.product_id)
-          .reduce((sum, m) => sum + m.quantity, 0);
-        const subtotal = qty * pp.products.unit_price * pp.commission_rate;
-        return {
-          sku: pp.products.sku,
-          name: pp.products.name,
-          unit: pp.products.unit,
-          unit_price: pp.products.unit_price,
-          out_qty: qty,
-          commission_rate: pp.commission_rate,
-          subtotal,
-        } as CommissionLine;
-      })
-      .filter(Boolean) as CommissionLine[];
-  });
-
-  const totalCommission = createMemo(() =>
-    commissionLines().reduce((sum, l) => sum + l.subtotal, 0)
+  const [projProducts, { refetch: refetchProjProducts }] = createResource(
+    expandedProjectId,
+    (id) => (id ? fetchProjectProducts(id) : Promise.resolve([] as ProjProductRow[]))
   );
 
-  // ── selected partner display name ────────────────────────────────────────
-  const selectedPartnerName = createMemo(() => {
-    if (isPartner()) return profile()?.display_name ?? profile()?.email ?? "";
-    const p = (partners() ?? []).find((p) => p.id === selectedPartnerId());
-    return p ? (p.display_name ?? p.email) : "";
+  const [projMovements] = createResource(
+    expandedProjectId,
+    (id) => (id ? fetchProjectMovements(id) : Promise.resolve([] as ProjMovementRow[]))
+  );
+
+  const totalCommission = createMemo(() => {
+    const pps = projProducts() ?? [];
+    const mvs = projMovements() ?? [];
+    return pps.reduce((sum, pp) => {
+      if (!pp.products) return sum;
+      const qty = mvs
+        .filter((m) => m.product_id === pp.product_id)
+        .reduce((s, m) => s + m.quantity, 0);
+      return sum + qty * pp.products.unit_price * pp.commission_rate;
+    }, 0);
   });
 
-  // ── PDF export ───────────────────────────────────────────────────────────
-  const handleExportPDF = () => {
-    const doc = new jsPDF();
-    const partnerLabel = selectedPartnerName();
-
-    doc.setFontSize(16);
-    doc.text("商品分潤報表", 14, 20);
-
-    doc.setFontSize(11);
-    doc.text(`合作廠商：${partnerLabel}`, 14, 32);
-    doc.text(`日期範圍：${dateFrom()} ～ ${dateTo()}`, 14, 40);
-
-    autoTable(doc, {
-      startY: 50,
-      head: [["SKU", "商品名稱", "單位", "單價", "出貨量", "抽成比例", "小計"]],
-      body: commissionLines().map((l) => [
-        l.sku,
-        l.name,
-        l.unit,
-        `$${l.unit_price.toFixed(2)}`,
-        l.out_qty.toString(),
-        `${(l.commission_rate * 100).toFixed(1)}%`,
-        `$${l.subtotal.toFixed(2)}`,
-      ]),
-      foot: [["", "", "", "", "", "總計分潤", `$${totalCommission().toFixed(2)}`]],
-      styles: { fontSize: 10 },
-      headStyles: { fillColor: [37, 99, 235] },
-      footStyles: { fontStyle: "bold" },
-    });
-
-    doc.save(`分潤報表_${partnerLabel}_${dateFrom()}_${dateTo()}.pdf`);
+  // ── Handlers ───────────────────────────────────────────────────
+  const toggleExpand = (projectId: string) => {
+    if (expandedProjectId() === projectId) {
+      setExpandedProjectId(null);
+      setShowAddProd(false);
+    } else {
+      setExpandedProjectId(projectId);
+      setShowAddProd(false);
+      setAddProdProductId("");
+      setAddProdRate(10);
+      setAddProdError("");
+      setAddProdSuccess("");
+    }
   };
 
-  // ── add partner handler ──────────────────────────────────────────────────
-  const handleAddPartner = async (e: Event) => {
+  const handleInvitePartner = async (e: Event) => {
     e.preventDefault();
-    setNewPartnerError("");
-    setNewPartnerSuccess("");
-    setNewPartnerSubmitting(true);
+    setInviteError("");
+    setInviteSuccess("");
+    setInviteSubmitting(true);
 
     const rawUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_PROJECT_ID;
-    const supabaseUrl = rawUrl.startsWith("http") || rawUrl.includes(".")
-      ? rawUrl
-      : `https://${rawUrl}.supabase.co`;
+    const supabaseUrl =
+      rawUrl.startsWith("http") || rawUrl.includes(".")
+        ? rawUrl
+        : `https://${rawUrl}.supabase.co`;
     const token = session()?.access_token;
 
     const res = await fetch(`${supabaseUrl}/functions/v1/invite-partner`, {
@@ -231,86 +222,134 @@ export function CommissionPage() {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({
-        email: newPartnerEmail(),
-        displayName: newPartnerName(),
-      }),
+      body: JSON.stringify({ email: inviteEmail(), displayName: inviteName() }),
     });
 
-    const json = await res.json() as { success?: boolean; error?: string };
-
+    const json = (await res.json()) as { success?: boolean; error?: string };
     if (!res.ok || json.error) {
-      setNewPartnerError(json.error ?? "發生未知錯誤");
-      setNewPartnerSubmitting(false);
+      setInviteError(json.error ?? "發生未知錯誤");
+      setInviteSubmitting(false);
       return;
     }
 
-    setNewPartnerSuccess(`邀請信已寄出至：${newPartnerEmail()}`);
-    setNewPartnerEmail("");
-    setNewPartnerName("");
-    setNewPartnerSubmitting(false);
+    setInviteSuccess(`邀請信已寄出至：${inviteEmail()}`);
+    setInviteEmail("");
+    setInviteName("");
+    setInviteSubmitting(false);
     refetchPartners();
   };
 
-  // ── add product assignment handler ────────────────────────────────────────
-  const handleAddProduct = async (e: Event) => {
+  const handleCreateProject = async (e: Event) => {
     e.preventDefault();
-    setAddProductError("");
-    setAddProductSuccess("");
-    setAddProductSubmitting(true);
+    setNewProjError("");
+    setNewProjSubmitting(true);
 
-    const payload: PartnerProductInsert = {
-      partner_id: addProductPartnerId(),
-      product_id: addProductId(),
-      commission_rate: addProductRate() / 100,
+    const payload: CollaborationProjectInsert = {
+      name: newProjName(),
+      partner_id: newProjPartnerId(),
+      start_date: newProjStartDate(),
+      end_date: newProjEndDate() || null,
+      note: newProjNote() || null,
     };
 
-    const { error } = await supabase.from("partner_products").upsert(payload, {
-      onConflict: "partner_id,product_id",
-    });
-
+    const { error } = await supabase.from("collaboration_projects").insert(payload);
     if (error) {
-      setAddProductError(error.message);
+      setNewProjError(error.message);
     } else {
-      setAddProductSuccess("已成功指定商品分潤");
-      setAddProductId("");
-      setAddProductRate(10);
-      refetchPartnerProducts();
+      setPanelMode("view");
+      setNewProjName("");
+      setNewProjPartnerId("");
+      setNewProjStartDate(today);
+      setNewProjEndDate("");
+      setNewProjNote("");
+      refetchProjects();
     }
-    setAddProductSubmitting(false);
+    setNewProjSubmitting(false);
   };
 
+  const handleAddProductToProject = async (e: Event) => {
+    e.preventDefault();
+    const projId = expandedProjectId();
+    if (!projId) return;
+    setAddProdError("");
+    setAddProdSuccess("");
+    setAddProdSubmitting(true);
+
+    const payload: CollaborationProjectProductInsert = {
+      project_id: projId,
+      product_id: addProdProductId(),
+      commission_rate: addProdRate() / 100,
+    };
+
+    const { error } = await supabase
+      .from("collaboration_project_products")
+      .upsert(payload, { onConflict: "project_id,product_id" });
+
+    if (error) {
+      setAddProdError(error.message);
+    } else {
+      setAddProdSuccess("已新增商品");
+      setAddProdProductId("");
+      setAddProdRate(10);
+      refetchProjProducts();
+    }
+    setAddProdSubmitting(false);
+  };
+
+  const handleToggleProjectStatus = async (project: ProjectRow) => {
+    const newStatus = project.status === "active" ? "closed" : "active";
+    await supabase
+      .from("collaboration_projects")
+      .update({ status: newStatus })
+      .eq("id", project.id);
+    refetchProjects();
+  };
+
+  const handleRemoveProjProduct = async (ppId: string) => {
+    await supabase.from("collaboration_project_products").delete().eq("id", ppId);
+    refetchProjProducts();
+  };
+
+  // ── JSX ────────────────────────────────────────────────────────
   return (
     <div>
-      <h1 class={pageTitle}>分潤管理</h1>
+      <h1 class={pageTitle}>合作專案分潤</h1>
 
-      {/* ── Admin Management Panel ─────────────────────────────────── */}
+      {/* Admin Management Panel */}
       <Show when={isAdmin()}>
         <div class={panelCard}>
-          <div class={css({ display: "flex", gap: "3", mb: "4" })}>
+          <div
+            class={css({
+              display: "flex",
+              gap: "3",
+              mb: panelMode() !== "view" ? "4" : "0",
+            })}
+          >
             <button
-              class={mgmtMode() === "add-partner" ? activeTabBtn : tabBtn}
-              onClick={() => setMgmtMode(mgmtMode() === "add-partner" ? "view" : "add-partner")}
+              class={panelMode() === "invite" ? activeTabBtn : tabBtn}
+              onClick={() => setPanelMode(panelMode() === "invite" ? "view" : "invite")}
             >
-              + 新增廠商帳號
+              邀請廠商帳號
             </button>
             <button
-              class={mgmtMode() === "add-product" ? activeTabBtn : tabBtn}
-              onClick={() => setMgmtMode(mgmtMode() === "add-product" ? "view" : "add-product")}
+              class={panelMode() === "new-project" ? activeTabBtn : tabBtn}
+              onClick={() =>
+                setPanelMode(panelMode() === "new-project" ? "view" : "new-project")
+              }
             >
-              + 指定商品 / 抽成
+              + 新增合作專案
             </button>
           </div>
 
-          {/* Add partner form */}
-          <Show when={mgmtMode() === "add-partner"}>
-            <form onSubmit={handleAddPartner} class={subForm}>
-              <h3 class={subFormTitle}>新增合作廠商帳號</h3>
-              <Show when={newPartnerError()}>
-                <div class={errorBox}>{newPartnerError()}</div>
+          {/* Invite form */}
+          <Show when={panelMode() === "invite"}>
+            <form onSubmit={handleInvitePartner} class={subForm}>
+              <h3 class={subFormTitle}>邀請合作廠商帳號</h3>
+              <Show when={inviteError()}>
+                <div class={errorBox}>{inviteError()}</div>
               </Show>
-              <Show when={newPartnerSuccess()}>
-                <div class={successBox}>{newPartnerSuccess()}</div>
+              <Show when={inviteSuccess()}>
+                <div class={successBox}>{inviteSuccess()}</div>
               </Show>
               <div class={formRow}>
                 <div class={fieldGroup}>
@@ -318,8 +357,8 @@ export function CommissionPage() {
                   <input
                     type="text"
                     required
-                    value={newPartnerName()}
-                    onInput={(e) => setNewPartnerName(e.currentTarget.value)}
+                    value={inviteName()}
+                    onInput={(e) => setInviteName(e.currentTarget.value)}
                     class={input}
                     placeholder="例如：欣欣貿易"
                   />
@@ -329,36 +368,33 @@ export function CommissionPage() {
                   <input
                     type="email"
                     required
-                    value={newPartnerEmail()}
-                    onInput={(e) => setNewPartnerEmail(e.currentTarget.value)}
+                    value={inviteEmail()}
+                    onInput={(e) => setInviteEmail(e.currentTarget.value)}
                     class={input}
                     placeholder="partner@example.com"
                   />
                 </div>
-                <button type="submit" disabled={newPartnerSubmitting()} class={submitBtn}>
-                  {newPartnerSubmitting() ? "建立中..." : "建立帳號"}
+                <button type="submit" disabled={inviteSubmitting()} class={submitBtn}>
+                  {inviteSubmitting() ? "建立中..." : "建立帳號"}
                 </button>
               </div>
             </form>
           </Show>
 
-          {/* Add product assignment form */}
-          <Show when={mgmtMode() === "add-product"}>
-            <form onSubmit={handleAddProduct} class={subForm}>
-              <h3 class={subFormTitle}>指定商品給廠商並設定抽成比例</h3>
-              <Show when={addProductError()}>
-                <div class={errorBox}>{addProductError()}</div>
-              </Show>
-              <Show when={addProductSuccess()}>
-                <div class={successBox}>{addProductSuccess()}</div>
+          {/* New project form */}
+          <Show when={panelMode() === "new-project"}>
+            <form onSubmit={handleCreateProject} class={subForm}>
+              <h3 class={subFormTitle}>新增合作專案</h3>
+              <Show when={newProjError()}>
+                <div class={errorBox}>{newProjError()}</div>
               </Show>
               <div class={formRow}>
                 <div class={fieldGroup}>
-                  <label class={label}>選擇廠商</label>
+                  <label class={label}>廠商 *</label>
                   <select
                     required
-                    value={addProductPartnerId()}
-                    onChange={(e) => setAddProductPartnerId(e.currentTarget.value)}
+                    value={newProjPartnerId()}
+                    onChange={(e) => setNewProjPartnerId(e.currentTarget.value)}
                     class={select}
                   >
                     <option value="">-- 請選擇廠商 --</option>
@@ -370,38 +406,47 @@ export function CommissionPage() {
                   </select>
                 </div>
                 <div class={fieldGroup}>
-                  <label class={label}>選擇商品</label>
-                  <select
-                    required
-                    value={addProductId()}
-                    onChange={(e) => setAddProductId(e.currentTarget.value)}
-                    class={select}
-                  >
-                    <option value="">-- 請選擇商品 --</option>
-                    <For each={allProducts()}>
-                      {(p) => (
-                        <option value={p.id}>
-                          [{p.sku}] {p.name}
-                        </option>
-                      )}
-                    </For>
-                  </select>
-                </div>
-                <div class={fieldGroup}>
-                  <label class={label}>抽成比例 (%)</label>
+                  <label class={label}>專案名稱 *</label>
                   <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="0.1"
+                    type="text"
                     required
-                    value={addProductRate()}
-                    onInput={(e) => setAddProductRate(parseFloat(e.currentTarget.value) || 0)}
-                    class={css({ ...inputStyles, w: "100px" })}
+                    value={newProjName()}
+                    onInput={(e) => setNewProjName(e.currentTarget.value)}
+                    class={input}
+                    placeholder="例如：2025 春季促銷"
                   />
                 </div>
-                <button type="submit" disabled={addProductSubmitting()} class={submitBtn}>
-                  {addProductSubmitting() ? "儲存中..." : "儲存"}
+                <div class={fieldGroup}>
+                  <label class={label}>開始日期 *</label>
+                  <input
+                    type="date"
+                    required
+                    value={newProjStartDate()}
+                    onInput={(e) => setNewProjStartDate(e.currentTarget.value)}
+                    class={input}
+                  />
+                </div>
+                <div class={fieldGroup}>
+                  <label class={label}>結束日期</label>
+                  <input
+                    type="date"
+                    value={newProjEndDate()}
+                    onInput={(e) => setNewProjEndDate(e.currentTarget.value)}
+                    class={input}
+                  />
+                </div>
+                <div class={fieldGroup}>
+                  <label class={label}>備註</label>
+                  <input
+                    type="text"
+                    value={newProjNote()}
+                    onInput={(e) => setNewProjNote(e.currentTarget.value)}
+                    class={input}
+                    placeholder="選填"
+                  />
+                </div>
+                <button type="submit" disabled={newProjSubmitting()} class={submitBtn}>
+                  {newProjSubmitting() ? "建立中..." : "建立專案"}
                 </button>
               </div>
             </form>
@@ -409,121 +454,275 @@ export function CommissionPage() {
         </div>
       </Show>
 
-      {/* ── Report Section ─────────────────────────────────────────── */}
+      {/* Projects List */}
       <div class={panelCard}>
-        {/* Controls */}
-        <div class={css({ display: "flex", gap: "4", flexWrap: "wrap", alignItems: "flex-end", mb: "5" })}>
-          <Show when={isAdmin()}>
-            <div class={fieldGroup}>
-              <label class={label}>選擇廠商</label>
-              <select
-                value={selectedPartnerId()}
-                onChange={(e) => setSelectedPartnerId(e.currentTarget.value)}
-                class={select}
-              >
-                <option value="">-- 請選擇廠商 --</option>
-                <For each={partners()}>
-                  {(p) => (
-                    <option value={p.id}>{p.display_name ?? p.email}</option>
-                  )}
-                </For>
-              </select>
-            </div>
-          </Show>
+        <h2 class={sectionTitle}>合作專案記錄</h2>
 
-          <div class={fieldGroup}>
-            <label class={label}>開始日期</label>
-            <input
-              type="date"
-              value={dateFrom()}
-              onInput={(e) => setDateFrom(e.currentTarget.value)}
-              class={input}
-            />
-          </div>
+        <Show when={projects.loading}>
+          <p class={loadingText}>載入中...</p>
+        </Show>
 
-          <div class={fieldGroup}>
-            <label class={label}>結束日期</label>
-            <input
-              type="date"
-              value={dateTo()}
-              onInput={(e) => setDateTo(e.currentTarget.value)}
-              class={input}
-            />
-          </div>
+        <Show when={!projects.loading && (projects() ?? []).length === 0}>
+          <p class={emptyText}>目前沒有合作專案</p>
+        </Show>
 
-          <Show when={commissionLines().length > 0}>
-            <button onClick={handleExportPDF} class={exportBtn}>
-              匯出 PDF
-            </button>
-          </Show>
+        <div class={css({ display: "flex", flexDir: "column", gap: "3" })}>
+          <For each={projects()}>
+            {(project) => {
+              const partnerLabel = () => {
+                const p = project.profiles;
+                return p ? (p.display_name ?? p.email) : project.partner_id;
+              };
+              const isExpanded = () => expandedProjectId() === project.id;
+
+              return (
+                <div class={projectCard}>
+                  {/* Project header row */}
+                  <button class={projectHeader} onClick={() => toggleExpand(project.id)}>
+                    <div
+                      class={css({
+                        display: "flex",
+                        gap: "3",
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        flex: "1",
+                      })}
+                    >
+                      <Show when={isAdmin()}>
+                        <span class={css({ fontSize: "sm", color: "gray.500" })}>
+                          {partnerLabel()}
+                        </span>
+                        <span class={css({ color: "gray.300" })}>|</span>
+                      </Show>
+                      <span class={css({ fontWeight: "semibold", color: "gray.800" })}>
+                        {project.name}
+                      </span>
+                      <span class={css({ fontSize: "sm", color: "gray.500" })}>
+                        {project.start_date} ～ {project.end_date ?? "進行中"}
+                      </span>
+                      <span class={project.status === "active" ? statusActive : statusClosed}>
+                        {project.status === "active" ? "進行中" : "已關閉"}
+                      </span>
+                      <Show when={project.note}>
+                        <span class={css({ fontSize: "xs", color: "gray.400" })}>
+                          {project.note}
+                        </span>
+                      </Show>
+                    </div>
+                    <span class={css({ color: "gray.400", flexShrink: "0" })}>
+                      {isExpanded() ? "▲" : "▼"}
+                    </span>
+                  </button>
+
+                  {/* Expanded detail */}
+                  <Show when={isExpanded()}>
+                    <div class={projectDetail}>
+                      <Show when={projProducts.loading || projMovements.loading}>
+                        <p class={loadingText}>載入中...</p>
+                      </Show>
+
+                      <Show when={!projProducts.loading && !projMovements.loading}>
+                        <Show when={(projProducts() ?? []).length === 0}>
+                          <p class={emptyText}>此專案尚未指定商品</p>
+                        </Show>
+
+                        <Show when={(projProducts() ?? []).length > 0}>
+                          <div class={css({ overflowX: "auto" })}>
+                            <table class={table}>
+                              <thead>
+                                <tr>
+                                  <th class={th}>SKU</th>
+                                  <th class={th}>商品名稱</th>
+                                  <th class={th}>單位</th>
+                                  <th class={th}>單價</th>
+                                  <th class={th}>出貨量</th>
+                                  <th class={th}>分潤%</th>
+                                  <th class={th}>小計</th>
+                                  <Show when={isAdmin()}>
+                                    <th class={th}></th>
+                                  </Show>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <For each={projProducts()}>
+                                  {(pp) => {
+                                    if (!pp.products) return null;
+                                    const qty = (projMovements() ?? [])
+                                      .filter((m) => m.product_id === pp.product_id)
+                                      .reduce((s, m) => s + m.quantity, 0);
+                                    const subtotal =
+                                      qty * pp.products.unit_price * pp.commission_rate;
+                                    return (
+                                      <tr class={css({ _hover: { bg: "gray.50" } })}>
+                                        <td class={td}>
+                                          <span
+                                            class={css({ fontFamily: "mono", fontSize: "xs" })}
+                                          >
+                                            {pp.products.sku}
+                                          </span>
+                                        </td>
+                                        <td class={td}>{pp.products.name}</td>
+                                        <td class={td}>{pp.products.unit}</td>
+                                        <td class={td}>
+                                          ${pp.products.unit_price.toFixed(2)}
+                                        </td>
+                                        <td class={td}>{qty}</td>
+                                        <td class={td}>
+                                          {(pp.commission_rate * 100).toFixed(1)}%
+                                        </td>
+                                        <td class={td}>
+                                          <span
+                                            class={css({
+                                              fontWeight: "semibold",
+                                              color: "blue.700",
+                                            })}
+                                          >
+                                            ${subtotal.toFixed(2)}
+                                          </span>
+                                        </td>
+                                        <Show when={isAdmin()}>
+                                          <td class={td}>
+                                            <button
+                                              class={removeBtnSmall}
+                                              onClick={() => handleRemoveProjProduct(pp.id)}
+                                            >
+                                              移除
+                                            </button>
+                                          </td>
+                                        </Show>
+                                      </tr>
+                                    );
+                                  }}
+                                </For>
+                              </tbody>
+                              <tfoot>
+                                <tr>
+                                  <td
+                                    colSpan={6}
+                                    class={css({
+                                      ...tdStyles,
+                                      textAlign: "right",
+                                      fontWeight: "semibold",
+                                      color: "gray.700",
+                                      bg: "gray.50",
+                                    })}
+                                  >
+                                    總計分潤
+                                  </td>
+                                  <td
+                                    class={css({
+                                      ...tdStyles,
+                                      fontWeight: "bold",
+                                      color: "blue.700",
+                                      fontSize: "md",
+                                      bg: "gray.50",
+                                    })}
+                                  >
+                                    ${totalCommission().toFixed(2)}
+                                  </td>
+                                  <Show when={isAdmin()}>
+                                    <td class={css({ ...tdStyles, bg: "gray.50" })}></td>
+                                  </Show>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        </Show>
+
+                        {/* Admin controls */}
+                        <Show when={isAdmin()}>
+                          <div
+                            class={css({
+                              mt: "4",
+                              display: "flex",
+                              gap: "3",
+                              alignItems: "flex-start",
+                              flexWrap: "wrap",
+                            })}
+                          >
+                            <button
+                              class={tabBtn}
+                              onClick={() => {
+                                setShowAddProd(!showAddProd());
+                                setAddProdError("");
+                                setAddProdSuccess("");
+                              }}
+                            >
+                              {showAddProd() ? "取消" : "+ 新增商品到專案"}
+                            </button>
+                            <button
+                              class={project.status === "active" ? dangerBtn : tabBtn}
+                              onClick={() => handleToggleProjectStatus(project)}
+                            >
+                              {project.status === "active" ? "關閉專案" : "重新開啟"}
+                            </button>
+                          </div>
+
+                          {/* Add product form */}
+                          <Show when={showAddProd()}>
+                            <form onSubmit={handleAddProductToProject} class={subFormInner}>
+                              <h4 class={subFormTitle}>新增商品並設定分潤</h4>
+                              <Show when={addProdError()}>
+                                <div class={errorBox}>{addProdError()}</div>
+                              </Show>
+                              <Show when={addProdSuccess()}>
+                                <div class={successBox}>{addProdSuccess()}</div>
+                              </Show>
+                              <div class={formRow}>
+                                <div class={fieldGroup}>
+                                  <label class={label}>選擇商品</label>
+                                  <select
+                                    required
+                                    value={addProdProductId()}
+                                    onChange={(e) =>
+                                      setAddProdProductId(e.currentTarget.value)
+                                    }
+                                    class={select}
+                                  >
+                                    <option value="">-- 請選擇商品 --</option>
+                                    <For each={allProducts()}>
+                                      {(p) => (
+                                        <option value={p.id}>
+                                          [{p.sku}] {p.name}
+                                        </option>
+                                      )}
+                                    </For>
+                                  </select>
+                                </div>
+                                <div class={fieldGroup}>
+                                  <label class={label}>分潤比例 (%)</label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    step="0.1"
+                                    required
+                                    value={addProdRate()}
+                                    onInput={(e) =>
+                                      setAddProdRate(parseFloat(e.currentTarget.value) || 0)
+                                    }
+                                    class={css({ ...inputStyles, w: "120px" })}
+                                  />
+                                </div>
+                                <button
+                                  type="submit"
+                                  disabled={addProdSubmitting()}
+                                  class={submitBtn}
+                                >
+                                  {addProdSubmitting() ? "新增中..." : "新增"}
+                                </button>
+                              </div>
+                            </form>
+                          </Show>
+                        </Show>
+                      </Show>
+                    </div>
+                  </Show>
+                </div>
+              );
+            }}
+          </For>
         </div>
-
-        {/* Result message when no partner selected */}
-        <Show when={!effectivePartnerId()}>
-          <p class={emptyText}>請選擇廠商以查看分潤報表</p>
-        </Show>
-
-        <Show when={effectivePartnerId()}>
-          {/* Loading */}
-          <Show when={partnerProducts.loading || movements.loading}>
-            <p class={loadingText}>載入中...</p>
-          </Show>
-
-          {/* Empty state */}
-          <Show when={!partnerProducts.loading && !movements.loading && commissionLines().length === 0}>
-            <p class={emptyText}>此廠商在選定期間內無出貨記錄</p>
-          </Show>
-
-          {/* Commission Table */}
-          <Show when={commissionLines().length > 0}>
-            <div class={css({ overflowX: "auto" })}>
-              <table class={table}>
-                <thead>
-                  <tr>
-                    <th class={th}>SKU</th>
-                    <th class={th}>商品名稱</th>
-                    <th class={th}>單位</th>
-                    <th class={th}>單價</th>
-                    <th class={th}>出貨量</th>
-                    <th class={th}>抽成比例</th>
-                    <th class={th}>小計</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <For each={commissionLines()}>
-                    {(line) => (
-                      <tr class={css({ _hover: { bg: "gray.50" } })}>
-                        <td class={td}>
-                          <span class={css({ fontFamily: "mono", fontSize: "xs" })}>{line.sku}</span>
-                        </td>
-                        <td class={td}>{line.name}</td>
-                        <td class={td}>{line.unit}</td>
-                        <td class={td}>${line.unit_price.toFixed(2)}</td>
-                        <td class={td}>{line.out_qty}</td>
-                        <td class={td}>{(line.commission_rate * 100).toFixed(1)}%</td>
-                        <td class={td}>
-                          <span class={css({ fontWeight: "semibold", color: "blue.700" })}>
-                            ${line.subtotal.toFixed(2)}
-                          </span>
-                        </td>
-                      </tr>
-                    )}
-                  </For>
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td colSpan={6} class={css({ ...tdStyles, textAlign: "right", fontWeight: "semibold", color: "gray.700", bg: "gray.50" })}>
-                      總計分潤
-                    </td>
-                    <td class={css({ ...tdStyles, fontWeight: "bold", color: "blue.700", fontSize: "md", bg: "gray.50" })}>
-                      ${totalCommission().toFixed(2)}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </Show>
-        </Show>
       </div>
     </div>
   );
@@ -558,12 +757,72 @@ const pageTitle = css({
   mb: "6",
 });
 
+const sectionTitle = css({
+  fontSize: "md",
+  fontWeight: "semibold",
+  color: "gray.800",
+  mb: "4",
+});
+
 const panelCard = css({
   bg: "white",
   borderRadius: "lg",
   shadow: "sm",
   p: "6",
   mb: "6",
+});
+
+const projectCard = css({
+  border: "1px solid",
+  borderColor: "gray.200",
+  borderRadius: "md",
+  overflow: "hidden",
+});
+
+const projectHeader = css({
+  w: "100%",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  px: "4",
+  py: "3",
+  bg: "white",
+  border: "none",
+  cursor: "pointer",
+  textAlign: "left",
+  _hover: { bg: "gray.50" },
+});
+
+const projectDetail = css({
+  px: "4",
+  py: "4",
+  bg: "gray.50",
+  borderTop: "1px solid",
+  borderColor: "gray.200",
+});
+
+const statusActive = css({
+  display: "inline-flex",
+  alignItems: "center",
+  px: "2",
+  py: "0.5",
+  borderRadius: "full",
+  fontSize: "xs",
+  fontWeight: "medium",
+  bg: "green.100",
+  color: "green.700",
+});
+
+const statusClosed = css({
+  display: "inline-flex",
+  alignItems: "center",
+  px: "2",
+  py: "0.5",
+  borderRadius: "full",
+  fontSize: "xs",
+  fontWeight: "medium",
+  bg: "gray.100",
+  color: "gray.600",
 });
 
 const tabBtn = css({
@@ -590,10 +849,41 @@ const activeTabBtn = css({
   _hover: { bg: "blue.700" },
 });
 
+const dangerBtn = css({
+  px: "4",
+  py: "2",
+  bg: "red.50",
+  color: "red.600",
+  borderRadius: "md",
+  fontSize: "sm",
+  cursor: "pointer",
+  border: "1px solid",
+  borderColor: "red.200",
+  _hover: { bg: "red.100" },
+});
+
+const removeBtnSmall = css({
+  color: "red.500",
+  fontSize: "xs",
+  cursor: "pointer",
+  bg: "none",
+  border: "none",
+  _hover: { color: "red.700", textDecoration: "underline" },
+});
+
 const subForm = css({
   bg: "gray.50",
   borderRadius: "md",
   p: "4",
+  border: "1px solid",
+  borderColor: "gray.200",
+});
+
+const subFormInner = css({
+  bg: "white",
+  borderRadius: "md",
+  p: "4",
+  mt: "3",
   border: "1px solid",
   borderColor: "gray.200",
 });
@@ -644,19 +934,6 @@ const submitBtn = css({
   cursor: "pointer",
   _hover: { bg: "blue.700" },
   _disabled: { opacity: 0.6, cursor: "default" },
-});
-
-const exportBtn = css({
-  px: "4",
-  py: "2",
-  bg: "green.600",
-  color: "white",
-  borderRadius: "md",
-  fontSize: "sm",
-  fontWeight: "medium",
-  border: "none",
-  cursor: "pointer",
-  _hover: { bg: "green.700" },
 });
 
 const errorBox = css({

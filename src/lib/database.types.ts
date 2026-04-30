@@ -79,27 +79,57 @@ export type Database = {
         };
         Relationships: [];
       };
-      partner_products: {
+      collaboration_projects: {
         Row: {
           id: string;
+          name: string;
           partner_id: string;
-          product_id: string;
-          commission_rate: number;
+          start_date: string;
+          end_date: string | null;
+          status: "active" | "closed";
+          note: string | null;
           created_at: string;
         };
         Insert: {
           id?: string;
+          name: string;
           partner_id: string;
-          product_id: string;
-          commission_rate?: number;
+          start_date: string;
+          end_date?: string | null;
+          status?: "active" | "closed";
+          note?: string | null;
           created_at?: string;
         };
         Update: {
           id?: string;
+          name?: string;
           partner_id?: string;
+          start_date?: string;
+          end_date?: string | null;
+          status?: "active" | "closed";
+          note?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      collaboration_project_products: {
+        Row: {
+          id: string;
+          project_id: string;
+          product_id: string;
+          commission_rate: number;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          product_id: string;
+          commission_rate?: number;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
           product_id?: string;
           commission_rate?: number;
-          created_at?: string;
         };
         Relationships: [];
       };
@@ -111,6 +141,7 @@ export type Database = {
           quantity: number;
           note: string | null;
           created_by: string;
+          project_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -120,6 +151,7 @@ export type Database = {
           quantity: number;
           note?: string | null;
           created_by: string;
+          project_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -129,6 +161,7 @@ export type Database = {
           quantity?: number;
           note?: string | null;
           created_by?: string;
+          project_id?: string | null;
           created_at?: string;
         };
         Relationships: [];
@@ -145,6 +178,9 @@ export type ProductInsert = Database["public"]["Tables"]["products"]["Insert"];
 export type ProductUpdate = Database["public"]["Tables"]["products"]["Update"];
 export type StockMovement = Database["public"]["Tables"]["stock_movements"]["Row"];
 export type StockMovementInsert = Database["public"]["Tables"]["stock_movements"]["Insert"];
-export type PartnerProduct = Database["public"]["Tables"]["partner_products"]["Row"];
-export type PartnerProductInsert = Database["public"]["Tables"]["partner_products"]["Insert"];
+export type CollaborationProject = Database["public"]["Tables"]["collaboration_projects"]["Row"];
+export type CollaborationProjectInsert = Database["public"]["Tables"]["collaboration_projects"]["Insert"];
+export type CollaborationProjectUpdate = Database["public"]["Tables"]["collaboration_projects"]["Update"];
+export type CollaborationProjectProduct = Database["public"]["Tables"]["collaboration_project_products"]["Row"];
+export type CollaborationProjectProductInsert = Database["public"]["Tables"]["collaboration_project_products"]["Insert"];
 export type UserRole = Profile["role"];
