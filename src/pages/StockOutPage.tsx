@@ -11,22 +11,16 @@ interface ActiveProject {
 }
 
 async function fetchActiveProjects(): Promise<ActiveProject[]> {
-  const today = new Date().toISOString().slice(0, 10);
   const { data, error } = await supabase
     .from("collaboration_projects")
-    .select("id, name, profiles(display_name, email)")
+    .select("id, name")
     .eq("status", "active")
-    .or(`end_date.is.null,end_date.gte.${today}`)
     .order("name");
   if (error) throw error;
-  return ((data ?? []) as unknown as Array<{
-    id: string;
-    name: string;
-    profiles: { display_name: string | null; email: string } | null;
-  }>).map((p) => ({
+  return (data ?? []).map((p) => ({
     id: p.id,
     name: p.name,
-    partnerName: p.profiles?.display_name ?? p.profiles?.email ?? "",
+    partnerName: "",
   }));
 }
 
@@ -144,25 +138,32 @@ export function StockOutPage() {
           </div>
         </Show>
 
-        <Show when={(activeProjects() ?? []).length > 0}>
-          <div class={fieldGroup}>
-            <label class={label}>合作專案（選填）</label>
-            <select
-              value={projectId()}
-              onChange={(e) => setProjectId(e.currentTarget.value)}
-              class={select}
-            >
-              <option value="">-- 不指定專案 --</option>
-              <For each={activeProjects()}>
-                {(proj) => (
-                  <option value={proj.id}>
-                    {proj.partnerName ? `${proj.partnerName} - ` : ""}{proj.name}
-                  </option>
-                )}
-              </For>
-            </select>
-          </div>
-        </Show>
+        <div class={fieldGroup}>
+          <label class={label}>合作專案（選填）</label>
+          <select
+            value={projectId()}
+            onChange={(e) => setProjectId(e.currentTarget.value)}
+            class={select}
+          >
+            <option value="">-- 不指定專案 --</option>
+            <For each={activeProjects()}>
+              {(proj) => (
+                <option value={proj.id}>
+                  {proj.partnerName ? `${proj.partnerName} - ` : ""}{proj.name}
+                </option>
+              )}
+            </For>
+          </select>
+          <Show when={activeProjects.loading}>
+            <span class={css({ fontSize: "xs", color: "gray.400" })}>載入中...</span>
+          </Show>
+          <Show when={activeProjects.error}>
+            <span class={css({ fontSize: "xs", color: "red.500" })}>載入專案失敗：{String(activeProjects.error)}</span>
+          </Show>
+          <Show when={!activeProjects.loading && !activeProjects.error && (activeProjects() ?? []).length === 0}>
+            <span class={css({ fontSize: "xs", color: "gray.400" })}>目前無進行中的合作專案</span>
+          </Show>
+        </div>
 
         <div class={fieldGroup}>
           <label class={label}>數量 *</label>

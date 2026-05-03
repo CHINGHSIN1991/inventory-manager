@@ -1,8 +1,23 @@
-import { createSignal, Show } from "solid-js";
+import { createSignal, createResource, For, Show } from "solid-js";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import type { Product } from "../lib/database.types";
 import { css } from "../../styled-system/css";
+
+interface ActiveProject {
+  id: string;
+  name: string;
+}
+
+async function fetchActiveProjects(): Promise<ActiveProject[]> {
+  const { data, error } = await supabase
+    .from("collaboration_projects")
+    .select("id, name")
+    .eq("status", "active")
+    .order("name");
+  if (error) throw error;
+  return data ?? [];
+}
 
 interface StockDialogProps {
   type: "in" | "out";
@@ -15,8 +30,14 @@ export function StockDialog(props: StockDialogProps) {
   const { profile } = useAuth();
   const [quantity, setQuantity] = createSignal(1);
   const [note, setNote] = createSignal("");
+  const [projectId, setProjectId] = createSignal("");
   const [error, setError] = createSignal("");
   const [submitting, setSubmitting] = createSignal(false);
+
+  const [activeProjects] = createResource(
+    () => props.type === "out",
+    (isOut) => (isOut ? fetchActiveProjects() : Promise.resolve([] as ActiveProject[]))
+  );
 
   const isOut = () => props.type === "out";
   const title = () => (isOut() ? "出貨" : "進貨");
@@ -38,6 +59,7 @@ export function StockDialog(props: StockDialogProps) {
       quantity: quantity(),
       note: note() || null,
       created_by: profile()!.id,
+      project_id: props.type === "out" ? (projectId() || null) : null,
     });
 
     setSubmitting(false);
@@ -104,6 +126,27 @@ export function StockDialog(props: StockDialogProps) {
               class={input}
             />
           </div>
+
+          <Show when={isOut()}>
+            <div class={fieldGroup}>
+              <label class={label}>合作專案（選填）</label>
+              <select
+                value={projectId()}
+                onChange={(e) => setProjectId(e.currentTarget.value)}
+                class={input}
+              >
+                <option value="">-- 不指定專案 --</option>
+                <For each={activeProjects()}>
+                  {(proj) => (
+                    <option value={proj.id}>{proj.name}</option>
+                  )}
+                </For>
+              </select>
+              <Show when={!activeProjects.loading && (activeProjects() ?? []).length === 0}>
+                <span class={css({ fontSize: "xs", color: "gray.400" })}>目前無進行中的合作專案</span>
+              </Show>
+            </div>
+          </Show>
 
           <div class={fieldGroup}>
             <label class={label}>備註</label>
