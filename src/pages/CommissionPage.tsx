@@ -203,6 +203,85 @@ export function CommissionPage() {
     }
   };
 
+  const exportProjectPDF = (project: ProjectRow) => {
+    const esc = (s: string) =>
+      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+    const pps = projProducts() ?? [];
+    const mvs = projMovements() ?? [];
+    const partnerName = project.profiles
+      ? esc(project.profiles.display_name ?? project.profiles.email)
+      : esc(project.partner_id);
+
+    const rows = pps
+      .filter((pp) => pp.products)
+      .map((pp) => {
+        const qty = mvs
+          .filter((m) => m.product_id === pp.product_id)
+          .reduce((s, m) => s + m.quantity, 0);
+        const subtotal = qty * pp.products!.unit_price * pp.commission_rate;
+        return `<tr>
+          <td>${esc(pp.products!.sku)}</td>
+          <td>${esc(pp.products!.name)}</td>
+          <td>${esc(pp.products!.unit)}</td>
+          <td>$${pp.products!.unit_price.toFixed(2)}</td>
+          <td>${qty}</td>
+          <td>${(pp.commission_rate * 100).toFixed(1)}%</td>
+          <td>$${subtotal.toFixed(2)}</td>
+        </tr>`;
+      })
+      .join("");
+
+    const html = `<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>\u5206\u6f64\u5831\u8868 - ${esc(project.name)}</title>
+  <style>
+    body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; padding: 32px; color: #111; }
+    h1 { font-size: 20px; margin: 0 0 16px; }
+    .meta { font-size: 13px; color: #555; margin-bottom: 24px; line-height: 1.8; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { background: #f3f4f6; text-align: left; padding: 8px 12px; border: 1px solid #d1d5db; font-weight: 600; }
+    td { padding: 8px 12px; border: 1px solid #e5e7eb; }
+    tfoot td { font-weight: bold; background: #f9fafb; }
+    .print-date { font-size: 11px; color: #9ca3af; margin-top: 20px; }
+    @media print { body { padding: 0; } }
+  </style>
+</head>
+<body>
+  <h1>\u5408\u4f5c\u5c08\u6848\u5206\u6f64\u5831\u8868</h1>
+  <div class="meta">
+    <div>\u5c08\u6848\u540d\u7a31\uff1a${esc(project.name)}</div>
+    <div>\u5408\u4f5c\u5ee0\u5546\uff1a${partnerName}</div>
+    <div>\u671f\u9593\uff1a${esc(project.start_date)} \uff5e ${project.end_date ? esc(project.end_date) : "\u9032\u884c\u4e2d"}</div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>SKU</th><th>\u5546\u54c1\u540d\u7a31</th><th>\u55ae\u4f4d</th><th>\u55ae\u50f9</th><th>\u51fa\u8ca8\u91cf</th><th>\u5206\u6f64%</th><th>\u5c0f\u8a08</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="6" style="text-align:right">\u7e3d\u8a08\u5206\u6f64</td>
+        <td>$${totalCommission().toFixed(2)}</td>
+      </tr>
+    </tfoot>
+  </table>
+  <p class="print-date">\u5217\u5370\u65e5\u671f\uff1a${new Date().toLocaleDateString("zh-TW")}</p>
+  <script>window.onload = function() { window.print(); };<\/script>
+</body>
+</html>`;
+
+    const win = window.open("", "_blank", "width=900,height=700");
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+    }
+  };
+
   const handleInvitePartner = async (e: Event) => {
     e.preventDefault();
     setInviteError("");
@@ -628,6 +707,33 @@ export function CommissionPage() {
                             </table>
                           </div>
                         </Show>
+
+                        {/* Export button — visible to all */}
+                        <div
+                          class={css({
+                            mt: "4",
+                            display: "flex",
+                            justifyContent: "flex-end",
+                          })}
+                        >
+                          <button
+                            class={css({
+                              px: "4",
+                              py: "2",
+                              bg: "green.600",
+                              color: "white",
+                              borderRadius: "md",
+                              fontSize: "sm",
+                              fontWeight: "medium",
+                              border: "none",
+                              cursor: "pointer",
+                              _hover: { bg: "green.700" },
+                            })}
+                            onClick={() => exportProjectPDF(project)}
+                          >
+                            &#x1F4C4; 匯出分潤報表
+                          </button>
+                        </div>
 
                         {/* Admin controls */}
                         <Show when={isAdmin()}>

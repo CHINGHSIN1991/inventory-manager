@@ -1,11 +1,19 @@
-import { Show, type ParentProps } from "solid-js";
-import { A, useNavigate } from "@solidjs/router";
+import { Show, createEffect, type ParentProps } from "solid-js";
+import { A, useNavigate, useLocation } from "@solidjs/router";
 import { useAuth } from "../contexts/AuthContext";
 import { css } from "../../styled-system/css";
 
 export function AppLayout(props: ParentProps) {
   const { profile, signOut } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Redirect partners away from non-commission pages
+  createEffect(() => {
+    if (profile()?.role === "partner" && location.pathname !== "/commission") {
+      navigate("/commission", { replace: true });
+    }
+  });
 
   const handleSignOut = async () => {
     await signOut();
@@ -48,9 +56,11 @@ export function AppLayout(props: ParentProps) {
           庫存管理系統
         </h1>
         <nav class={css({ display: "flex", flexDir: "column", gap: "1", flex: 1 })}>
-          <NavLink href="/">首頁總覽</NavLink>
-          <NavLink href="/products">商品管理</NavLink>
-          <NavLink href="/stock/history">異動紀錄</NavLink>
+          <Show when={profile()?.role !== "partner"}>
+            <NavLink href="/">首頁總覽</NavLink>
+            <NavLink href="/products">商品管理</NavLink>
+            <NavLink href="/stock/history">異動紀錄</NavLink>
+          </Show>
           <NavLink href="/commission">分潤管理</NavLink>
           <Show when={profile()?.role === "admin"}>
             <NavLink href="/admin/users">帳號管理</NavLink>

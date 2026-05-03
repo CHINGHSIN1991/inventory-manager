@@ -9,14 +9,33 @@ interface ActiveProject {
   name: string;
 }
 
-async function fetchActiveProjects(): Promise<ActiveProject[]> {
+async function fetchEligibleProjects(productId: string): Promise<ActiveProject[]> {
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Step 1: find which projects include this product
+  const { data: ppData, error: ppError } = await supabase
+    .from("collaboration_project_products")
+    .select("project_id")
+    .eq("product_id", productId);
+  if (ppError) throw ppError;
+
+  const projectIds = (ppData ?? []).map((r) => r.project_id);
+  if (projectIds.length === 0) return [];
+
+  // Step 2: filter to active projects within date range
   const { data, error } = await supabase
     .from("collaboration_projects")
-    .select("id, name")
+    .select("id, name, end_date")
+    .in("id", projectIds)
     .eq("status", "active")
+    .lte("start_date", today)
     .order("name");
   if (error) throw error;
-  return data ?? [];
+
+  // Post-filter: null end_date means open-ended
+  return (data ?? [])
+    .filter((p) => !p.end_date || p.end_date >= today)
+    .map((p) => ({ id: p.id, name: p.name }));
 }
 
 interface StockDialogProps {
@@ -35,8 +54,9 @@ export function StockDialog(props: StockDialogProps) {
   const [submitting, setSubmitting] = createSignal(false);
 
   const [activeProjects] = createResource(
-    () => props.type === "out",
-    (isOut) => (isOut ? fetchActiveProjects() : Promise.resolve([] as ActiveProject[]))
+    () => (props.type === "out" ? props.product.id : null),
+    (productId) =>
+      productId ? fetchEligibleProjects(productId) : Promise.resolve([] as ActiveProject[])
   );
 
   const isOut = () => props.type === "out";
