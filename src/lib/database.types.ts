@@ -142,6 +142,7 @@ export type Database = {
           note: string | null;
           created_by: string;
           project_id: string | null;
+          order_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -152,6 +153,7 @@ export type Database = {
           note?: string | null;
           created_by: string;
           project_id?: string | null;
+          order_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -162,7 +164,62 @@ export type Database = {
           note?: string | null;
           created_by?: string;
           project_id?: string | null;
+          order_id?: string | null;
           created_at?: string;
+        };
+        Relationships: [];
+      };
+      orders: {
+        Row: {
+          id: string;
+          order_number: string;
+          project_id: string | null;
+          note: string | null;
+          status: "active" | "cancelled";
+          cancelled_note: string | null;
+          created_by: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          order_number?: string;
+          project_id?: string | null;
+          note?: string | null;
+          status?: "active" | "cancelled";
+          cancelled_note?: string | null;
+          created_by: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          order_number?: string;
+          project_id?: string | null;
+          note?: string | null;
+          status?: "active" | "cancelled";
+          cancelled_note?: string | null;
+          created_by?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      order_items: {
+        Row: {
+          id: string;
+          order_id: string;
+          product_id: string;
+          quantity: number;
+        };
+        Insert: {
+          id?: string;
+          order_id: string;
+          product_id: string;
+          quantity: number;
+        };
+        Update: {
+          id?: string;
+          order_id?: string;
+          product_id?: string;
+          quantity?: number;
         };
         Relationships: [];
       };
@@ -183,4 +240,8 @@ export type CollaborationProjectInsert = Database["public"]["Tables"]["collabora
 export type CollaborationProjectUpdate = Database["public"]["Tables"]["collaboration_projects"]["Update"];
 export type CollaborationProjectProduct = Database["public"]["Tables"]["collaboration_project_products"]["Row"];
 export type CollaborationProjectProductInsert = Database["public"]["Tables"]["collaboration_project_products"]["Insert"];
+export type Order = Database["public"]["Tables"]["orders"]["Row"];
+export type OrderInsert = Database["public"]["Tables"]["orders"]["Insert"];
+export type OrderItem = Database["public"]["Tables"]["order_items"]["Row"];
+export type OrderItemInsert = Database["public"]["Tables"]["order_items"]["Insert"];
 export type UserRole = Profile["role"];

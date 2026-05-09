@@ -10,12 +10,13 @@ interface MovementRow {
   created_at: string;
   products: { sku: string; name: string } | null;
   profiles: { display_name: string | null; email: string } | null;
+  orders: { order_number: string } | null;
 }
 
 async function fetchMovements(): Promise<MovementRow[]> {
   const { data, error } = await supabase
     .from("stock_movements")
-    .select("id, type, quantity, note, created_at, products(sku, name), profiles:created_by(display_name, email)")
+    .select("id, type, quantity, note, created_at, products(sku, name), profiles:created_by(display_name, email), orders(order_number)")
     .order("created_at", { ascending: false })
     .limit(100);
 
@@ -53,6 +54,7 @@ export function StockHistoryPage() {
                   <th class={th}>類型</th>
                   <th class={th}>商品</th>
                   <th class={th}>數量</th>
+                  <th class={th}>出貨單</th>
                   <th class={th}>操作人</th>
                   <th class={th}>備註</th>
                 </tr>
@@ -98,6 +100,13 @@ export function StockHistoryPage() {
                         >
                           {m.type === "in" ? "+" : "-"}{m.quantity}
                         </span>
+                      </td>
+                      <td class={td}>
+                        <Show when={m.orders} fallback={<span class={css({ color: "gray.300" })}>—</span>}>
+                          <span class={css({ fontFamily: "mono", fontSize: "xs", color: "gray.500" })}>
+                            {m.orders!.order_number}
+                          </span>
+                        </Show>
                       </td>
                       <td class={td}>
                         {m.profiles?.display_name ?? m.profiles?.email ?? "-"}

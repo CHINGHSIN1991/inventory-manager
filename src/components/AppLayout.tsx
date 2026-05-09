@@ -59,6 +59,7 @@ export function AppLayout(props: ParentProps) {
           <Show when={profile()?.role !== "partner"}>
             <NavLink href="/">首頁總覽</NavLink>
             <NavLink href="/products">商品管理</NavLink>
+            <NavLink href="/orders">出貨單</NavLink>
             <NavLink href="/stock/history">異動紀錄</NavLink>
           </Show>
           <NavLink href="/commission">分潤管理</NavLink>

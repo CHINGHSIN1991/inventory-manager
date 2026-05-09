@@ -173,20 +173,6 @@ export function ProductListPage() {
                             >
                               進貨
                             </button>
-                            <button
-                              onClick={() => setStockDialog({ type: "out", product })}
-                              class={css({
-                                color: "orange.600",
-                                fontSize: "sm",
-                                bg: "transparent",
-                                border: "none",
-                                cursor: "pointer",
-                                p: "0",
-                                _hover: { textDecoration: "underline" },
-                              })}
-                            >
-                              出貨
-                            </button>
                             <A
                               href={`/products/${product.id}/edit`}
                               class={css({

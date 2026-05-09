@@ -332,3 +332,89 @@ CREATE POLICY "Partner can view own collaboration_project_products"
       WHERE cp.id = project_id AND cp.partner_id = auth.uid()
     )
   );
+
+-- ============================================
+-- Orders (出貨單)
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS public.orders (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_number text NOT NULL UNIQUE,
+  project_id uuid REFERENCES public.collaboration_projects(id) ON DELETE SET NULL,
+  note text,
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  cancelled_note text,
+  created_by uuid NOT NULL REFERENCES public.profiles(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Auto-generate order_number: ORD-YYYYMMDD-NNN
+CREATE OR REPLACE FUNCTION public.generate_order_number()
+RETURNS TRIGGER AS $$
+DECLARE
+  today text;
+  seq integer;
+BEGIN
+  today := to_char(now() AT TIME ZONE 'Asia/Taipei', 'YYYYMMDD');
+  SELECT COUNT(*) + 1 INTO seq FROM public.orders WHERE order_number LIKE 'ORD-' || today || '-%';
+  NEW.order_number := 'ORD-' || today || '-' || LPAD(seq::text, 3, '0');
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS on_order_created ON public.orders;
+CREATE TRIGGER on_order_created
+  BEFORE INSERT ON public.orders
+  FOR EACH ROW EXECUTE FUNCTION public.generate_order_number();
+
+-- Order items
+CREATE TABLE IF NOT EXISTS public.order_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  product_id uuid NOT NULL REFERENCES public.products(id) ON DELETE RESTRICT,
+  quantity integer NOT NULL CHECK (quantity > 0)
+);
+
+-- Add order_id to stock_movements
+ALTER TABLE public.stock_movements
+  ADD COLUMN IF NOT EXISTS order_id uuid REFERENCES public.orders(id) ON DELETE SET NULL;
+
+-- Enable RLS
+ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
+
+-- orders: admin/warehouse can view all
+DROP POLICY IF EXISTS "Admin and warehouse can view orders" ON public.orders;
+CREATE POLICY "Admin and warehouse can view orders"
+  ON public.orders FOR SELECT
+  TO authenticated
+  USING (public.get_user_role() IN ('admin', 'warehouse'));
+
+-- orders: admin/warehouse can insert
+DROP POLICY IF EXISTS "Admin and warehouse can insert orders" ON public.orders;
+CREATE POLICY "Admin and warehouse can insert orders"
+  ON public.orders FOR INSERT
+  TO authenticated
+  WITH CHECK (public.get_user_role() IN ('admin', 'warehouse'));
+
+-- orders: only admin can update (for cancellation)
+DROP POLICY IF EXISTS "Admin can update orders" ON public.orders;
+CREATE POLICY "Admin can update orders"
+  ON public.orders FOR UPDATE
+  TO authenticated
+  USING (public.get_user_role() = 'admin')
+  WITH CHECK (public.get_user_role() = 'admin');
+
+-- order_items: admin/warehouse can view
+DROP POLICY IF EXISTS "Admin and warehouse can view order_items" ON public.order_items;
+CREATE POLICY "Admin and warehouse can view order_items"
+  ON public.order_items FOR SELECT
+  TO authenticated
+  USING (public.get_user_role() IN ('admin', 'warehouse'));
+
+-- order_items: admin/warehouse can insert
+DROP POLICY IF EXISTS "Admin and warehouse can insert order_items" ON public.order_items;
+CREATE POLICY "Admin and warehouse can insert order_items"
+  ON public.order_items FOR INSERT
+  TO authenticated
+  WITH CHECK (public.get_user_role() IN ('admin', 'warehouse'));
