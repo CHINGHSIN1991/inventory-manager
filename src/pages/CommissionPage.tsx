@@ -111,8 +111,9 @@ export function CommissionPage() {
   const isAdmin = () => profile()?.role === "admin";
   const today = new Date().toISOString().slice(0, 10);
 
-  // ── Admin panel mode ────────────────────────────────────────────
-  const [panelMode, setPanelMode] = createSignal<"view" | "invite" | "new-project">("view");
+  // ── Dialog visibility ────────────────────────────────────────────
+  const [showInviteDialog, setShowInviteDialog] = createSignal(false);
+  const [showNewProjectDialog, setShowNewProjectDialog] = createSignal(false);
 
   // Invite partner form
   const [inviteEmail, setInviteEmail] = createSignal("");
@@ -375,7 +376,7 @@ export function CommissionPage() {
     if (error) {
       setNewProjError(error.message);
     } else {
-      setPanelMode("view");
+      setShowNewProjectDialog(false);
       setNewProjName("");
       setNewProjPartnerId("");
       setNewProjStartDate(today);
@@ -432,146 +433,27 @@ export function CommissionPage() {
   // ── JSX ────────────────────────────────────────────────────────
   return (
     <div>
-      <h1 class={pageTitle}>合作專案分潤</h1>
-
-      {/* Admin Management Panel */}
-      <Show when={isAdmin()}>
-        <div class={panelCard}>
-          <div
-            class={css({
-              display: "flex",
-              gap: "3",
-              mb: panelMode() !== "view" ? "4" : "0",
-            })}
-          >
-            <button
-              class={panelMode() === "invite" ? activeTabBtn : tabBtn}
-              onClick={() => setPanelMode(panelMode() === "invite" ? "view" : "invite")}
-            >
+      {/* Page Header */}
+      <div
+        class={css({
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          mb: "6",
+        })}
+      >
+        <h1 class={pageTitle}>合作專案分潤</h1>
+        <Show when={isAdmin()}>
+          <div class={css({ display: "flex", gap: "2" })}>
+            <button class={tabBtn} onClick={() => setShowInviteDialog(true)}>
               邀請廠商帳號
             </button>
-            <button
-              class={panelMode() === "new-project" ? activeTabBtn : tabBtn}
-              onClick={() =>
-                setPanelMode(panelMode() === "new-project" ? "view" : "new-project")
-              }
-            >
+            <button class={activeTabBtn} onClick={() => setShowNewProjectDialog(true)}>
               + 新增合作專案
             </button>
           </div>
-
-          {/* Invite form */}
-          <Show when={panelMode() === "invite"}>
-            <form onSubmit={handleInvitePartner} class={subForm}>
-              <h3 class={subFormTitle}>邀請合作廠商帳號</h3>
-              <Show when={inviteError()}>
-                <div class={errorBox}>{inviteError()}</div>
-              </Show>
-              <Show when={inviteSuccess()}>
-                <div class={successBox}>{inviteSuccess()}</div>
-              </Show>
-              <div class={formRow}>
-                <div class={fieldGroup}>
-                  <label class={label}>廠商名稱</label>
-                  <input
-                    type="text"
-                    required
-                    value={inviteName()}
-                    onInput={(e) => setInviteName(e.currentTarget.value)}
-                    class={input}
-                    placeholder="例如：欣欣貿易"
-                  />
-                </div>
-                <div class={fieldGroup}>
-                  <label class={label}>登入 Email</label>
-                  <input
-                    type="email"
-                    required
-                    value={inviteEmail()}
-                    onInput={(e) => setInviteEmail(e.currentTarget.value)}
-                    class={input}
-                    placeholder="partner@example.com"
-                  />
-                </div>
-                <button type="submit" disabled={inviteSubmitting()} class={submitBtn}>
-                  {inviteSubmitting() ? "建立中..." : "建立帳號"}
-                </button>
-              </div>
-            </form>
-          </Show>
-
-          {/* New project form */}
-          <Show when={panelMode() === "new-project"}>
-            <form onSubmit={handleCreateProject} class={subForm}>
-              <h3 class={subFormTitle}>新增合作專案</h3>
-              <Show when={newProjError()}>
-                <div class={errorBox}>{newProjError()}</div>
-              </Show>
-              <div class={formRow}>
-                <div class={fieldGroup}>
-                  <label class={label}>廠商 *</label>
-                  <select
-                    required
-                    value={newProjPartnerId()}
-                    onChange={(e) => setNewProjPartnerId(e.currentTarget.value)}
-                    class={select}
-                  >
-                    <option value="">-- 請選擇廠商 --</option>
-                    <For each={partners()}>
-                      {(p) => (
-                        <option value={p.id}>{p.display_name ?? p.email}</option>
-                      )}
-                    </For>
-                  </select>
-                </div>
-                <div class={fieldGroup}>
-                  <label class={label}>專案名稱 *</label>
-                  <input
-                    type="text"
-                    required
-                    value={newProjName()}
-                    onInput={(e) => setNewProjName(e.currentTarget.value)}
-                    class={input}
-                    placeholder="例如：2025 春季促銷"
-                  />
-                </div>
-                <div class={fieldGroup}>
-                  <label class={label}>開始日期 *</label>
-                  <input
-                    type="date"
-                    required
-                    value={newProjStartDate()}
-                    onInput={(e) => setNewProjStartDate(e.currentTarget.value)}
-                    class={input}
-                  />
-                </div>
-                <div class={fieldGroup}>
-                  <label class={label}>結束日期</label>
-                  <input
-                    type="date"
-                    value={newProjEndDate()}
-                    onInput={(e) => setNewProjEndDate(e.currentTarget.value)}
-                    class={input}
-                  />
-                </div>
-                <div class={fieldGroup}>
-                  <label class={label}>備註</label>
-                  <input
-                    type="text"
-                    value={newProjNote()}
-                    onInput={(e) => setNewProjNote(e.currentTarget.value)}
-                    class={input}
-                    placeholder="選填"
-                  />
-                </div>
-                <button type="submit" disabled={newProjSubmitting()} class={submitBtn}>
-                  {newProjSubmitting() ? "建立中..." : "建立專案"}
-                </button>
-              </div>
-            </form>
-          </Show>
-        </div>
-      </Show>
+        </Show>
+      </div>
 
       {/* Filter Bar */}
       <div
@@ -922,11 +804,217 @@ export function CommissionPage() {
           </For>
         </div>
       </div>
+
+      {/* Invite Partner Dialog */}
+      <Show when={showInviteDialog()}>
+        <div
+          class={overlay}
+          onClick={(e) => e.target === e.currentTarget && setShowInviteDialog(false)}
+        >
+          <div class={dialogCard}>
+            <div class={dialogHeader}>
+              <h2 class={css({ fontSize: "lg", fontWeight: "bold", color: "gray.900" })}>
+                邀請合作廠商帳號
+              </h2>
+              <button
+                class={closeBtn}
+                onClick={() => setShowInviteDialog(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <Show when={inviteError()}>
+              <div class={errorBox}>{inviteError()}</div>
+            </Show>
+            <Show when={inviteSuccess()}>
+              <div class={successBox}>{inviteSuccess()}</div>
+            </Show>
+            <form
+              onSubmit={handleInvitePartner}
+              class={css({ display: "flex", flexDir: "column", gap: "3" })}
+            >
+              <div class={fieldGroup}>
+                <label class={label}>廠商名稱</label>
+                <input
+                  type="text"
+                  required
+                  value={inviteName()}
+                  onInput={(e) => setInviteName(e.currentTarget.value)}
+                  class={input}
+                  placeholder="例如：欣欣貿易"
+                />
+              </div>
+              <div class={fieldGroup}>
+                <label class={label}>登入 Email</label>
+                <input
+                  type="email"
+                  required
+                  value={inviteEmail()}
+                  onInput={(e) => setInviteEmail(e.currentTarget.value)}
+                  class={input}
+                  placeholder="partner@example.com"
+                />
+              </div>
+              <div class={css({ display: "flex", gap: "3", justifyContent: "flex-end", mt: "2" })}>
+                <button
+                  type="button"
+                  class={tabBtn}
+                  onClick={() => setShowInviteDialog(false)}
+                >
+                  取消
+                </button>
+                <button type="submit" disabled={inviteSubmitting()} class={submitBtn}>
+                  {inviteSubmitting() ? "建立中..." : "建立帳號"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </Show>
+
+      {/* New Project Dialog */}
+      <Show when={showNewProjectDialog()}>
+        <div
+          class={overlay}
+          onClick={(e) => e.target === e.currentTarget && setShowNewProjectDialog(false)}
+        >
+          <div class={dialogCard}>
+            <div class={dialogHeader}>
+              <h2 class={css({ fontSize: "lg", fontWeight: "bold", color: "gray.900" })}>
+                新增合作專案
+              </h2>
+              <button
+                class={closeBtn}
+                onClick={() => setShowNewProjectDialog(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <Show when={newProjError()}>
+              <div class={errorBox}>{newProjError()}</div>
+            </Show>
+            <form
+              onSubmit={handleCreateProject}
+              class={css({ display: "flex", flexDir: "column", gap: "3" })}
+            >
+              <div class={fieldGroup}>
+                <label class={label}>廠商 *</label>
+                <select
+                  required
+                  value={newProjPartnerId()}
+                  onChange={(e) => setNewProjPartnerId(e.currentTarget.value)}
+                  class={select}
+                >
+                  <option value="">-- 請選擇廠商 --</option>
+                  <For each={partners()}>
+                    {(p) => (
+                      <option value={p.id}>{p.display_name ?? p.email}</option>
+                    )}
+                  </For>
+                </select>
+              </div>
+              <div class={fieldGroup}>
+                <label class={label}>專案名稱 *</label>
+                <input
+                  type="text"
+                  required
+                  value={newProjName()}
+                  onInput={(e) => setNewProjName(e.currentTarget.value)}
+                  class={input}
+                  placeholder="例如：2025 春季促銷"
+                />
+              </div>
+              <div class={css({ display: "flex", gap: "3" })}>
+                <div class={css({ flex: 1 })}>
+                  <label class={label}>開始日期 *</label>
+                  <input
+                    type="date"
+                    required
+                    value={newProjStartDate()}
+                    onInput={(e) => setNewProjStartDate(e.currentTarget.value)}
+                    class={input}
+                  />
+                </div>
+                <div class={css({ flex: 1 })}>
+                  <label class={label}>結束日期</label>
+                  <input
+                    type="date"
+                    value={newProjEndDate()}
+                    onInput={(e) => setNewProjEndDate(e.currentTarget.value)}
+                    class={input}
+                  />
+                </div>
+              </div>
+              <div class={fieldGroup}>
+                <label class={label}>備註</label>
+                <input
+                  type="text"
+                  value={newProjNote()}
+                  onInput={(e) => setNewProjNote(e.currentTarget.value)}
+                  class={input}
+                  placeholder="選填"
+                />
+              </div>
+              <div class={css({ display: "flex", gap: "3", justifyContent: "flex-end", mt: "2" })}>
+                <button
+                  type="button"
+                  class={tabBtn}
+                  onClick={() => setShowNewProjectDialog(false)}
+                >
+                  取消
+                </button>
+                <button type="submit" disabled={newProjSubmitting()} class={submitBtn}>
+                  {newProjSubmitting() ? "建立中..." : "建立專案"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </Show>
     </div>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
+
+const overlay = css({
+  position: "fixed",
+  inset: 0,
+  bg: "blackAlpha.600",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 50,
+  p: "4",
+});
+
+const dialogCard = css({
+  bg: "white",
+  borderRadius: "xl",
+  p: "6",
+  w: "full",
+  maxW: "480px",
+  maxH: "90vh",
+  overflowY: "auto",
+  boxShadow: "2xl",
+});
+
+const dialogHeader = css({
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  mb: "4",
+});
+
+const closeBtn = css({
+  bg: "transparent",
+  border: "none",
+  cursor: "pointer",
+  fontSize: "xl",
+  color: "gray.500",
+  lineHeight: 1,
+  _hover: { color: "gray.700" },
+});
 
 const inputStyles = {
   w: "100%",
@@ -952,7 +1040,6 @@ const pageTitle = css({
   fontSize: "xl",
   fontWeight: "bold",
   color: "gray.900",
-  mb: "6",
 });
 
 const sectionTitle = css({
@@ -1067,14 +1154,6 @@ const removeBtnSmall = css({
   bg: "none",
   border: "none",
   _hover: { color: "red.700", textDecoration: "underline" },
-});
-
-const subForm = css({
-  bg: "gray.50",
-  borderRadius: "md",
-  p: "4",
-  border: "1px solid",
-  borderColor: "gray.200",
 });
 
 const subFormInner = css({
