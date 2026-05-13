@@ -133,6 +133,12 @@ export function CommissionPage() {
   // Expanded project
   const [expandedProjectId, setExpandedProjectId] = createSignal<string | null>(null);
 
+  // Filters — draft (bound to dropdowns) + applied (committed on 搜尋)
+  const [draftFilterStatus, setDraftFilterStatus] = createSignal<"active" | "closed" | "all">("active");
+  const [draftFilterPartnerId, setDraftFilterPartnerId] = createSignal("");
+  const [filterStatus, setFilterStatus] = createSignal<"active" | "closed" | "all">("active");
+  const [filterPartnerId, setFilterPartnerId] = createSignal("");
+
   // Add product to expanded project form
   const [showAddProd, setShowAddProd] = createSignal(false);
   const [addProdProductId, setAddProdProductId] = createSignal("");
@@ -159,10 +165,29 @@ export function CommissionPage() {
 
   const [projects, { refetch: refetchProjects }] = createResource(
     projectsKey,
-    ({ isA, pid }) => {
-      if (isA) return fetchAllProjects();
-      if (pid) return fetchMyProjects(pid);
-      return Promise.resolve([] as ProjectRow[]);
+    async ({ isA, pid }) => {
+      let data: ProjectRow[];
+      if (isA) data = await fetchAllProjects();
+      else if (pid) data = await fetchMyProjects(pid);
+      else return [] as ProjectRow[];
+
+      // Auto-close projects whose end_date has passed
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const expired = data.filter(
+        (p) => p.status === "active" && p.end_date && p.end_date < todayStr
+      );
+      if (expired.length > 0) {
+        await supabase
+          .from("collaboration_projects")
+          .update({ status: "closed" })
+          .in("id", expired.map((p) => p.id));
+        data = data.map((p) =>
+          p.status === "active" && p.end_date && p.end_date < todayStr
+            ? { ...p, status: "closed" as const }
+            : p
+        );
+      }
+      return data;
     }
   );
 
@@ -188,7 +213,22 @@ export function CommissionPage() {
     }, 0);
   });
 
+  const filteredProjects = createMemo(() => {
+    const all = projects() ?? [];
+    return all.filter((p) => {
+      const fs = filterStatus();
+      const statusMatch = fs === "all" || p.status === fs;
+      const partnerMatch = !filterPartnerId() || p.partner_id === filterPartnerId();
+      return statusMatch && partnerMatch;
+    });
+  });
+
   // ── Handlers ───────────────────────────────────────────────────
+  const handleSearch = () => {
+    setFilterStatus(draftFilterStatus());
+    setFilterPartnerId(draftFilterPartnerId());
+  };
+
   const toggleExpand = (projectId: string) => {
     if (expandedProjectId() === projectId) {
       setExpandedProjectId(null);
@@ -533,6 +573,53 @@ export function CommissionPage() {
         </div>
       </Show>
 
+      {/* Filter Bar */}
+      <div
+        class={css({
+          display: "flex",
+          gap: "2",
+          alignItems: "center",
+          justifyContent: "space-between",
+          bg: "white",
+          borderRadius: "lg",
+          shadow: "sm",
+          px: "6",
+          py: "4",
+          mb: "6",
+        })}
+      >
+        <div class={css({ display: "flex", gap: "2", alignItems: "center", flexWrap: "wrap" })}>
+          <select
+            value={draftFilterStatus()}
+            onChange={(e) =>
+              setDraftFilterStatus(e.currentTarget.value as "active" | "closed" | "all")
+            }
+            class={filterSelect}
+          >
+            <option value="active">進行中</option>
+            <option value="closed">已結束</option>
+            <option value="all">全部</option>
+          </select>
+          <Show when={isAdmin()}>
+            <select
+              value={draftFilterPartnerId()}
+              onChange={(e) => setDraftFilterPartnerId(e.currentTarget.value)}
+              class={filterSelect}
+            >
+              <option value="">全部廠商</option>
+              <For each={partners()}>
+                {(p) => (
+                  <option value={p.id}>{p.display_name ?? p.email}</option>
+                )}
+              </For>
+            </select>
+          </Show>
+        </div>
+        <button class={tabBtn} onClick={handleSearch}>
+          搜尋
+        </button>
+      </div>
+
       {/* Projects List */}
       <div class={panelCard}>
         <h2 class={sectionTitle}>合作專案記錄</h2>
@@ -541,12 +628,16 @@ export function CommissionPage() {
           <p class={loadingText}>載入中...</p>
         </Show>
 
-        <Show when={!projects.loading && (projects() ?? []).length === 0}>
-          <p class={emptyText}>目前沒有合作專案</p>
+        <Show when={!projects.loading && filteredProjects().length === 0}>
+          <p class={emptyText}>
+            {(projects() ?? []).length === 0
+              ? "目前沒有合作專案"
+              : "沒有符合篩選條件的專案"}
+          </p>
         </Show>
 
         <div class={css({ display: "flex", flexDir: "column", gap: "3" })}>
-          <For each={projects()}>
+          <For each={filteredProjects()}>
             {(project) => {
               const partnerLabel = () => {
                 const p = project.profiles;
@@ -580,7 +671,7 @@ export function CommissionPage() {
                         {project.start_date} ～ {project.end_date ?? "進行中"}
                       </span>
                       <span class={project.status === "active" ? statusActive : statusClosed}>
-                        {project.status === "active" ? "進行中" : "已關閉"}
+                        {project.status === "active" ? "進行中" : "已結束"}
                       </span>
                       <Show when={project.note}>
                         <span class={css({ fontSize: "xs", color: "gray.400" })}>
@@ -759,6 +850,7 @@ export function CommissionPage() {
                             <button
                               class={project.status === "active" ? dangerBtn : tabBtn}
                               onClick={() => handleToggleProjectStatus(project)}
+                              title={project.status === "closed" ? "重新開啟後，若結束日期仍在過去，下次頁面載入將再次自動關閉，請記得同時更新結束日期" : undefined}
                             >
                               {project.status === "active" ? "關閉專案" : "重新開啟"}
                             </button>
@@ -1026,6 +1118,13 @@ const input = css(inputStyles);
 const select = css({
   ...inputStyles,
   bg: "white",
+});
+
+const filterSelect = css({
+  ...inputStyles,
+  bg: "white",
+  w: "auto",
+  minW: "140px",
 });
 
 const submitBtn = css({
