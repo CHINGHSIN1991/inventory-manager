@@ -342,7 +342,7 @@ CREATE TABLE IF NOT EXISTS public.orders (
   order_number text NOT NULL UNIQUE,
   project_id uuid REFERENCES public.collaboration_projects(id) ON DELETE SET NULL,
   note text,
-  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'shipped', 'completed', 'cancelled')),
   cancelled_note text,
   created_by uuid NOT NULL REFERENCES public.profiles(id),
   created_at timestamptz NOT NULL DEFAULT now()
@@ -402,8 +402,8 @@ DROP POLICY IF EXISTS "Admin can update orders" ON public.orders;
 CREATE POLICY "Admin can update orders"
   ON public.orders FOR UPDATE
   TO authenticated
-  USING (public.get_user_role() = 'admin')
-  WITH CHECK (public.get_user_role() = 'admin');
+  USING (public.get_user_role() IN ('admin', 'warehouse'))
+  WITH CHECK (public.get_user_role() IN ('admin', 'warehouse'));
 
 -- order_items: admin/warehouse can view
 DROP POLICY IF EXISTS "Admin and warehouse can view order_items" ON public.order_items;
@@ -418,3 +418,72 @@ CREATE POLICY "Admin and warehouse can insert order_items"
   ON public.order_items FOR INSERT
   TO authenticated
   WITH CHECK (public.get_user_role() IN ('admin', 'warehouse'));
+
+-- ============================================
+-- Bundle Products (組合商品)
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS public.bundles (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sku text NOT NULL UNIQUE,
+  name text NOT NULL,
+  description text,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.bundle_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  bundle_id uuid NOT NULL REFERENCES public.bundles(id) ON DELETE CASCADE,
+  product_id uuid NOT NULL REFERENCES public.products(id) ON DELETE RESTRICT,
+  quantity integer NOT NULL CHECK (quantity > 0),
+  UNIQUE (bundle_id, product_id)
+);
+
+DROP TRIGGER IF EXISTS on_bundles_updated ON public.bundles;
+CREATE TRIGGER on_bundles_updated
+  BEFORE UPDATE ON public.bundles
+  FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+
+ALTER TABLE public.bundles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bundle_items ENABLE ROW LEVEL SECURITY;
+
+-- bundles: admin/warehouse can view all
+DROP POLICY IF EXISTS "Admin and warehouse can view bundles" ON public.bundles;
+CREATE POLICY "Admin and warehouse can view bundles"
+  ON public.bundles FOR SELECT
+  TO authenticated
+  USING (public.get_user_role() IN ('admin', 'warehouse'));
+
+-- bundles: admin can manage
+DROP POLICY IF EXISTS "Admin can manage bundles" ON public.bundles;
+CREATE POLICY "Admin can manage bundles"
+  ON public.bundles FOR ALL
+  TO authenticated
+  USING (public.get_user_role() = 'admin')
+  WITH CHECK (public.get_user_role() = 'admin');
+
+-- bundle_items: admin/warehouse can view
+DROP POLICY IF EXISTS "Admin and warehouse can view bundle_items" ON public.bundle_items;
+CREATE POLICY "Admin and warehouse can view bundle_items"
+  ON public.bundle_items FOR SELECT
+  TO authenticated
+  USING (public.get_user_role() IN ('admin', 'warehouse'));
+
+-- bundle_items: admin can manage
+DROP POLICY IF EXISTS "Admin can manage bundle_items" ON public.bundle_items;
+CREATE POLICY "Admin can manage bundle_items"
+  ON public.bundle_items FOR ALL
+  TO authenticated
+  USING (public.get_user_role() = 'admin')
+  WITH CHECK (public.get_user_role() = 'admin');
+
+-- ============================================
+-- Migration: update orders status constraint
+-- ============================================
+ALTER TABLE public.orders
+  DROP CONSTRAINT IF EXISTS orders_status_check;
+ALTER TABLE public.orders
+  ADD CONSTRAINT orders_status_check
+  CHECK (status IN ('active', 'shipped', 'completed', 'cancelled'));

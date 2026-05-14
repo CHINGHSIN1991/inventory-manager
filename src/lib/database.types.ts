@@ -175,7 +175,7 @@ export type Database = {
           order_number: string;
           project_id: string | null;
           note: string | null;
-          status: "active" | "cancelled";
+          status: "active" | "shipped" | "completed" | "cancelled";
           cancelled_note: string | null;
           created_by: string;
           created_at: string;
@@ -185,7 +185,7 @@ export type Database = {
           order_number?: string;
           project_id?: string | null;
           note?: string | null;
-          status?: "active" | "cancelled";
+          status?: "active" | "shipped" | "completed" | "cancelled";
           cancelled_note?: string | null;
           created_by: string;
           created_at?: string;
@@ -195,7 +195,7 @@ export type Database = {
           order_number?: string;
           project_id?: string | null;
           note?: string | null;
-          status?: "active" | "cancelled";
+          status?: "active" | "shipped" | "completed" | "cancelled";
           cancelled_note?: string | null;
           created_by?: string;
           created_at?: string;
@@ -223,6 +223,57 @@ export type Database = {
         };
         Relationships: [];
       };
+      bundles: {
+        Row: {
+          id: string;
+          sku: string;
+          name: string;
+          description: string | null;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          sku: string;
+          name: string;
+          description?: string | null;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          sku?: string;
+          name?: string;
+          description?: string | null;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      bundle_items: {
+        Row: {
+          id: string;
+          bundle_id: string;
+          product_id: string;
+          quantity: number;
+        };
+        Insert: {
+          id?: string;
+          bundle_id: string;
+          product_id: string;
+          quantity: number;
+        };
+        Update: {
+          id?: string;
+          bundle_id?: string;
+          product_id?: string;
+          quantity?: number;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
@@ -244,4 +295,9 @@ export type Order = Database["public"]["Tables"]["orders"]["Row"];
 export type OrderInsert = Database["public"]["Tables"]["orders"]["Insert"];
 export type OrderItem = Database["public"]["Tables"]["order_items"]["Row"];
 export type OrderItemInsert = Database["public"]["Tables"]["order_items"]["Insert"];
+export type Bundle = Database["public"]["Tables"]["bundles"]["Row"];
+export type BundleInsert = Database["public"]["Tables"]["bundles"]["Insert"];
+export type BundleUpdate = Database["public"]["Tables"]["bundles"]["Update"];
+export type BundleItem = Database["public"]["Tables"]["bundle_items"]["Row"];
+export type BundleItemInsert = Database["public"]["Tables"]["bundle_items"]["Insert"];
 export type UserRole = Profile["role"];
