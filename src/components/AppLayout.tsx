@@ -61,6 +61,7 @@ export function AppLayout(props: ParentProps) {
             <NavLink href="/products">商品管理</NavLink>
             <NavLink href="/bundles">組合商品</NavLink>
             <NavLink href="/orders">出貨單</NavLink>
+            <NavLink href="/sales">銷售統計</NavLink>
             <NavLink href="/stock/history">異動紀錄</NavLink>
           </Show>
           <NavLink href="/commission">分潤管理</NavLink>

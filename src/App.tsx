@@ -14,6 +14,7 @@ import { CommissionPage } from "./pages/CommissionPage";
 import { UserManagementPage } from "./pages/UserManagementPage";
 import { OrdersPage } from "./pages/OrdersPage";
 import { BundlesPage } from "./pages/BundlesPage";
+import { SalesPage } from "./pages/SalesPage";
 
 export default function App() {
   return (
@@ -37,6 +38,7 @@ export default function App() {
           <Route path="/products/:id/edit" component={ProductFormPage} />
           <Route path="/stock/history" component={StockHistoryPage} />
           <Route path="/orders" component={OrdersPage} />
+          <Route path="/sales" component={SalesPage} />
           <Route path="/bundles" component={BundlesPage} />
           <Route path="/commission" component={CommissionPage} />
           <Route path="/admin/users" component={UserManagementPage} />
