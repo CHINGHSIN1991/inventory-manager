@@ -134,9 +134,7 @@ export function CommissionPage() {
   // Expanded project
   const [expandedProjectId, setExpandedProjectId] = createSignal<string | null>(null);
 
-  // Filters — draft (bound to dropdowns) + applied (committed on 搜尋)
-  const [draftFilterStatus, setDraftFilterStatus] = createSignal<"active" | "closed" | "all">("active");
-  const [draftFilterPartnerId, setDraftFilterPartnerId] = createSignal("");
+  // Filters
   const [filterStatus, setFilterStatus] = createSignal<"active" | "closed" | "all">("active");
   const [filterPartnerId, setFilterPartnerId] = createSignal("");
 
@@ -225,11 +223,6 @@ export function CommissionPage() {
   });
 
   // ── Handlers ───────────────────────────────────────────────────
-  const handleSearch = () => {
-    setFilterStatus(draftFilterStatus());
-    setFilterPartnerId(draftFilterPartnerId());
-  };
-
   const toggleExpand = (projectId: string) => {
     if (expandedProjectId() === projectId) {
       setExpandedProjectId(null);
@@ -472,9 +465,9 @@ export function CommissionPage() {
       >
         <div class={css({ display: "flex", gap: "2", alignItems: "center", flexWrap: "wrap" })}>
           <select
-            value={draftFilterStatus()}
+            value={filterStatus()}
             onChange={(e) =>
-              setDraftFilterStatus(e.currentTarget.value as "active" | "closed" | "all")
+              setFilterStatus(e.currentTarget.value as "active" | "closed" | "all")
             }
             class={filterSelect}
           >
@@ -484,8 +477,8 @@ export function CommissionPage() {
           </select>
           <Show when={isAdmin()}>
             <select
-              value={draftFilterPartnerId()}
-              onChange={(e) => setDraftFilterPartnerId(e.currentTarget.value)}
+              value={filterPartnerId()}
+              onChange={(e) => setFilterPartnerId(e.currentTarget.value)}
               class={filterSelect}
             >
               <option value="">全部廠商</option>
@@ -497,9 +490,6 @@ export function CommissionPage() {
             </select>
           </Show>
         </div>
-        <button class={tabBtn} onClick={handleSearch}>
-          搜尋
-        </button>
       </div>
 
       {/* Projects List */}
