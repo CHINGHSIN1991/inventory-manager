@@ -428,6 +428,7 @@ CREATE TABLE IF NOT EXISTS public.bundles (
   sku text NOT NULL UNIQUE,
   name text NOT NULL,
   description text,
+  price numeric(12, 2) NOT NULL DEFAULT 0,
   is_active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
@@ -478,6 +479,39 @@ CREATE POLICY "Admin can manage bundle_items"
   TO authenticated
   USING (public.get_user_role() = 'admin')
   WITH CHECK (public.get_user_role() = 'admin');
+
+-- ============================================
+-- Order Bundles (出貨單組合商品)
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS public.order_bundles (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  bundle_id uuid NOT NULL REFERENCES public.bundles(id) ON DELETE RESTRICT,
+  quantity integer NOT NULL CHECK (quantity > 0),
+  unit_price numeric(12, 2) NOT NULL DEFAULT 0
+);
+
+ALTER TABLE public.order_bundles ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Admin and warehouse can view order_bundles" ON public.order_bundles;
+CREATE POLICY "Admin and warehouse can view order_bundles"
+  ON public.order_bundles FOR SELECT
+  TO authenticated
+  USING (public.get_user_role() IN ('admin', 'warehouse'));
+
+DROP POLICY IF EXISTS "Admin and warehouse can manage order_bundles" ON public.order_bundles;
+CREATE POLICY "Admin and warehouse can manage order_bundles"
+  ON public.order_bundles FOR ALL
+  TO authenticated
+  USING (public.get_user_role() IN ('admin', 'warehouse'))
+  WITH CHECK (public.get_user_role() IN ('admin', 'warehouse'));
+
+-- ============================================
+-- Migration: add price to bundles
+-- ============================================
+ALTER TABLE public.bundles
+  ADD COLUMN IF NOT EXISTS price numeric(12, 2) NOT NULL DEFAULT 0;
 
 -- ============================================
 -- Migration: update orders status constraint

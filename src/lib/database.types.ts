@@ -229,6 +229,7 @@ export type Database = {
           sku: string;
           name: string;
           description: string | null;
+          price: number;
           is_active: boolean;
           created_at: string;
           updated_at: string;
@@ -238,6 +239,7 @@ export type Database = {
           sku: string;
           name: string;
           description?: string | null;
+          price: number;
           is_active?: boolean;
           created_at?: string;
           updated_at?: string;
@@ -247,9 +249,34 @@ export type Database = {
           sku?: string;
           name?: string;
           description?: string | null;
+          price?: number;
           is_active?: boolean;
           created_at?: string;
           updated_at?: string;
+        };
+        Relationships: [];
+      };
+      order_bundles: {
+        Row: {
+          id: string;
+          order_id: string;
+          bundle_id: string;
+          quantity: number;
+          unit_price: number;
+        };
+        Insert: {
+          id?: string;
+          order_id: string;
+          bundle_id: string;
+          quantity: number;
+          unit_price: number;
+        };
+        Update: {
+          id?: string;
+          order_id?: string;
+          bundle_id?: string;
+          quantity?: number;
+          unit_price?: number;
         };
         Relationships: [];
       };
@@ -300,4 +327,6 @@ export type BundleInsert = Database["public"]["Tables"]["bundles"]["Insert"];
 export type BundleUpdate = Database["public"]["Tables"]["bundles"]["Update"];
 export type BundleItem = Database["public"]["Tables"]["bundle_items"]["Row"];
 export type BundleItemInsert = Database["public"]["Tables"]["bundle_items"]["Insert"];
+export type OrderBundle = Database["public"]["Tables"]["order_bundles"]["Row"];
+export type OrderBundleInsert = Database["public"]["Tables"]["order_bundles"]["Insert"];
 export type UserRole = Profile["role"];

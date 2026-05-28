@@ -45,13 +45,15 @@ interface OrderRow {
   created_at: string;
   profiles: { id: string; display_name: string | null; email: string } | null;
   collaboration_projects: { name: string } | null;
-  order_items: { id: string; quantity: number; products: { sku: string; name: string; unit: string } | null }[];
+  order_items: { id: string; quantity: number; products: { sku: string; name: string; unit: string; unit_price: number } | null }[];
+  order_bundles: { id: string; quantity: number; unit_price: number; bundles: { sku: string; name: string } | null }[];
 }
 
 interface BundleOption {
   id: string;
   sku: string;
   name: string;
+  price: number;
   items: { productId: string; quantity: number; productName: string; productSku: string; stock: number }[];
 }
 
@@ -61,7 +63,7 @@ async function fetchOrders(): Promise<OrderRow[]> {
   const { data, error } = await supabase
     .from("orders")
     .select(
-      "id, order_number, project_id, note, status, cancelled_note, created_at, profiles:created_by(id, display_name, email), collaboration_projects(name), order_items(id, quantity, products(sku, name, unit))"
+      "id, order_number, project_id, note, status, cancelled_note, created_at, profiles:created_by(id, display_name, email), collaboration_projects(name), order_items(id, quantity, products(sku, name, unit, unit_price)), order_bundles(id, quantity, unit_price, bundles(sku, name))"
     )
     .order("created_at", { ascending: false });
   if (error) throw error;
@@ -104,17 +106,18 @@ async function fetchActiveProducts(): Promise<Product[]> {
 async function fetchActiveBundles(): Promise<BundleOption[]> {
   const { data, error } = await supabase
     .from("bundles")
-    .select("id, sku, name, bundle_items(product_id, quantity, products(id, sku, name, quantity))")
+    .select("id, sku, name, price, bundle_items(product_id, quantity, products(id, sku, name, quantity))")
     .eq("is_active", true)
     .order("name");
   if (error) throw error;
   return ((data ?? []) as unknown as {
-    id: string; sku: string; name: string;
+    id: string; sku: string; name: string; price: number;
     bundle_items: { product_id: string; quantity: number; products: { id: string; sku: string; name: string; quantity: number } | null }[];
   }[]).map((b) => ({
     id: b.id,
     sku: b.sku,
     name: b.name,
+    price: b.price,
     items: b.bundle_items.map((bi) => ({
       productId: bi.products?.id ?? bi.product_id,
       quantity: bi.quantity,
@@ -153,6 +156,7 @@ function CreateOrderDialog(props: CreateOrderDialogProps) {
   const [note, setNote] = createSignal("");
   const [items, setItems] = createSignal<OrderItem[]>([{ productId: "", quantity: 1 }]);
   const [bundleId, setBundleId] = createSignal("");
+  const [bundleItems, setBundleItems] = createSignal<{ bundleId: string; quantity: number }[]>([]);
   const [error, setError] = createSignal("");
   const [submitting, setSubmitting] = createSignal(false);
 
@@ -176,21 +180,27 @@ function CreateOrderDialog(props: CreateOrderDialogProps) {
   const addBundle = () => {
     const bundle = (activeBundles() ?? []).find((b) => b.id === bundleId());
     if (!bundle) return;
-    setItems((prev) => {
-      const next = [...prev];
-      for (const bi of bundle.items) {
-        const existing = next.findIndex((i) => i.productId === bi.productId);
-        if (existing >= 0) {
-          next[existing] = { ...next[existing], quantity: next[existing].quantity + bi.quantity };
-        } else {
-          next.push({ productId: bi.productId, quantity: bi.quantity });
-        }
+    setBundleItems((prev) => {
+      const existing = prev.findIndex((bi) => bi.bundleId === bundle.id);
+      if (existing >= 0) {
+        const next = [...prev];
+        next[existing] = { ...next[existing], quantity: next[existing].quantity + 1 };
+        return next;
       }
-      // Remove empty placeholder if it's the only item and has no productId
-      return next.filter((i, idx) => idx !== 0 || i.productId !== "" || next.length > 1 ? true : false).filter((i) => !(i.productId === "" && next.length > 1));
+      return [...prev, { bundleId: bundle.id, quantity: 1 }];
     });
     setBundleId("");
   };
+
+  const removeBundleItem = (idx: number) =>
+    setBundleItems((prev) => prev.filter((_, i) => i !== idx));
+
+  const updateBundleQty = (idx: number, qty: number) =>
+    setBundleItems((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], quantity: qty };
+      return next;
+    });
 
   const selectedProductIds = createMemo(() => items().map((i) => i.productId).filter(Boolean));
 
@@ -199,20 +209,36 @@ function CreateOrderDialog(props: CreateOrderDialogProps) {
     setError("");
 
     const validItems = items().filter((i) => i.productId && i.quantity > 0);
-    if (validItems.length === 0) {
-      setError("請至少新增一項商品");
+    const validBundleItems = bundleItems().filter((bi) => bi.bundleId && bi.quantity > 0);
+
+    if (validItems.length === 0 && validBundleItems.length === 0) {
+      setError("請至少新增一項商品或組合商品");
       return;
     }
 
     const products = allProducts() ?? [];
+    const bundles = activeBundles() ?? [];
 
-    // Check stock
+    // Check standalone item stock
     for (const item of validItems) {
       const product = products.find((p) => p.id === item.productId);
       if (!product) continue;
       if (item.quantity > product.quantity) {
         setError(`庫存不足：${product.name}（目前庫存 ${product.quantity}）`);
         return;
+      }
+    }
+
+    // Check bundle item stock (each bundle component × bundle quantity)
+    for (const bi of validBundleItems) {
+      const bundle = bundles.find((b) => b.id === bi.bundleId);
+      if (!bundle) continue;
+      for (const component of bundle.items) {
+        const needed = component.quantity * bi.quantity;
+        if (needed > component.stock) {
+          setError(`組合商品「${bundle.name}」庫存不足：${component.productName}（需要 ${needed}，目前庫存 ${component.stock}）`);
+          return;
+        }
       }
     }
 
@@ -237,22 +263,34 @@ function CreateOrderDialog(props: CreateOrderDialogProps) {
 
     const orderId = orderData.id;
 
-    // 2. Insert order_items
-    const { error: itemsErr } = await supabase.from("order_items").insert(
-      validItems.map((i) => ({
-        order_id: orderId,
-        product_id: i.productId,
-        quantity: i.quantity,
-      }))
-    );
-
-    if (itemsErr) {
-      setError(itemsErr.message);
-      setSubmitting(false);
-      return;
+    // 2. Insert order_bundles
+    if (validBundleItems.length > 0) {
+      const { error: obErr } = await supabase.from("order_bundles").insert(
+        validBundleItems.map((bi) => {
+          const bundle = bundles.find((b) => b.id === bi.bundleId)!;
+          return { order_id: orderId, bundle_id: bi.bundleId, quantity: bi.quantity, unit_price: bundle.price };
+        })
+      );
+      if (obErr) {
+        setError(obErr.message);
+        setSubmitting(false);
+        return;
+      }
     }
 
-    // 3. Insert stock_movements (type=out) for each item
+    // 3. Insert order_items (standalone only)
+    if (validItems.length > 0) {
+      const { error: itemsErr } = await supabase.from("order_items").insert(
+        validItems.map((i) => ({ order_id: orderId, product_id: i.productId, quantity: i.quantity }))
+      );
+      if (itemsErr) {
+        setError(itemsErr.message);
+        setSubmitting(false);
+        return;
+      }
+    }
+
+    // 4. Build stock movements
     let projectProductIds: Set<string> = new Set();
     if (projectId()) {
       const { data: ppData } = await supabase
@@ -262,15 +300,35 @@ function CreateOrderDialog(props: CreateOrderDialogProps) {
       projectProductIds = new Set((ppData ?? []).map((r) => r.product_id));
     }
 
-    const movements = validItems.map((item) => ({
-      product_id: item.productId,
-      type: "out" as const,
-      quantity: item.quantity,
-      created_by: profile()!.id,
-      order_id: orderId,
-      project_id:
-        projectId() && projectProductIds.has(item.productId) ? projectId() : null,
-    }));
+    const movements: { product_id: string; type: "out"; quantity: number; created_by: string; order_id: string; project_id: string | null }[] = [];
+
+    // Standalone item movements
+    for (const item of validItems) {
+      movements.push({
+        product_id: item.productId,
+        type: "out",
+        quantity: item.quantity,
+        created_by: profile()!.id,
+        order_id: orderId,
+        project_id: projectId() && projectProductIds.has(item.productId) ? projectId() : null,
+      });
+    }
+
+    // Bundle component movements (expand bundle × quantity)
+    for (const bi of validBundleItems) {
+      const bundle = bundles.find((b) => b.id === bi.bundleId);
+      if (!bundle) continue;
+      for (const component of bundle.items) {
+        movements.push({
+          product_id: component.productId,
+          type: "out",
+          quantity: component.quantity * bi.quantity,
+          created_by: profile()!.id,
+          order_id: orderId,
+          project_id: projectId() && projectProductIds.has(component.productId) ? projectId() : null,
+        });
+      }
+    }
 
     const { error: movErr } = await supabase.from("stock_movements").insert(movements);
 
@@ -371,7 +429,7 @@ function CreateOrderDialog(props: CreateOrderDialogProps) {
             />
           </div>
 
-          {/* Bundle quick-add */}
+          {/* Bundle section */}
           <Show when={(activeBundles()?.length ?? 0) > 0}>
             <div
               class={css({
@@ -382,8 +440,9 @@ function CreateOrderDialog(props: CreateOrderDialogProps) {
                 borderRadius: "md",
               })}
             >
-              <p class={css({ fontSize: "sm", fontWeight: "medium", color: "purple.700", mb: "2" })}>加入組合商品</p>
-              <div class={css({ display: "flex", gap: "2" })}>
+              <p class={css({ fontSize: "sm", fontWeight: "medium", color: "purple.700", mb: "2" })}>組合商品</p>
+              {/* Bundle picker */}
+              <div class={css({ display: "flex", gap: "2", mb: "2" })}>
                 <select
                   value={bundleId()}
                   onChange={(e) => setBundleId(e.currentTarget.value)}
@@ -392,7 +451,7 @@ function CreateOrderDialog(props: CreateOrderDialogProps) {
                 >
                   <option value="">— 選擇組合商品 —</option>
                   <For each={activeBundles()}>
-                    {(b) => <option value={b.id}>[{b.sku}] {b.name}</option>}
+                    {(b) => <option value={b.id}>[{b.sku}] {b.name}（${b.price.toFixed(2)} / 套）</option>}
                   </For>
                 </select>
                 <button
@@ -416,8 +475,9 @@ function CreateOrderDialog(props: CreateOrderDialogProps) {
                   加入
                 </button>
               </div>
+              {/* Preview of selected bundle content */}
               <Show when={bundleId()}>
-                <div class={css({ mt: "2", display: "flex", flexWrap: "wrap", gap: "1" })}>
+                <div class={css({ mb: "2", display: "flex", flexWrap: "wrap", gap: "1" })}>
                   <For each={(activeBundles() ?? []).find((b) => b.id === bundleId())?.items ?? []}>
                     {(bi) => (
                       <span class={css({ fontSize: "xs", px: "2", py: "0.5", bg: "purple.100", color: "purple.700", borderRadius: "md" })}>
@@ -425,6 +485,41 @@ function CreateOrderDialog(props: CreateOrderDialogProps) {
                       </span>
                     )}
                   </For>
+                </div>
+              </Show>
+              {/* Added bundle items */}
+              <Show when={bundleItems().length > 0}>
+                <div class={css({ display: "flex", flexDir: "column", gap: "1" })}>
+                  <Index each={bundleItems()}>
+                    {(bi, idx) => {
+                      const bundle = () => (activeBundles() ?? []).find((b) => b.id === bi().bundleId);
+                      return (
+                        <div class={css({ display: "grid", gridTemplateColumns: "1fr 90px 32px", gap: "2", alignItems: "center" })}>
+                          <span class={css({ fontSize: "sm", color: "purple.800" })}>
+                            [{bundle()?.sku}] {bundle()?.name}
+                            <span class={css({ fontSize: "xs", color: "purple.500", ml: "1" })}>
+                              × ${bundle()?.price.toFixed(2)}
+                            </span>
+                          </span>
+                          <input
+                            type="number"
+                            min="1"
+                            value={bi().quantity}
+                            onInput={(e) => updateBundleQty(idx, parseInt(e.currentTarget.value) || 1)}
+                            class={input}
+                            placeholder="套數"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeBundleItem(idx)}
+                            class={css({ color: "red.500", bg: "transparent", border: "none", cursor: "pointer", fontSize: "lg", _hover: { color: "red.700" } })}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    }}
+                  </Index>
                 </div>
               </Show>
             </div>
@@ -584,21 +679,22 @@ function CancelOrderDialog(props: CancelOrderDialogProps) {
     setError("");
     setSubmitting(true);
 
-    // Fetch order items to reverse stock
-    const { data: itemsData, error: itemsErr } = await supabase
-      .from("order_items")
+    // Fetch all out-movements for this order to reverse stock (handles both standalone and bundle items)
+    const { data: movData, error: movFetchErr } = await supabase
+      .from("stock_movements")
       .select("product_id, quantity")
-      .eq("order_id", props.orderId);
+      .eq("order_id", props.orderId)
+      .eq("type", "out");
 
-    if (itemsErr || !itemsData) {
-      setError(itemsErr?.message ?? "讀取訂單失敗");
+    if (movFetchErr || !movData) {
+      setError(movFetchErr?.message ?? "讀取訂單失敗");
       setSubmitting(false);
       return;
     }
 
     // Insert reversal stock_movements (type=in)
     const { error: movErr } = await supabase.from("stock_movements").insert(
-      itemsData.map((item) => ({
+      movData.map((item) => ({
         product_id: item.product_id,
         type: "in" as const,
         quantity: item.quantity,
@@ -754,19 +850,20 @@ function ChangeStatusDialog(props: ChangeStatusDialogProps) {
     setError("");
     setSubmitting(true);
 
-    // If cancelling, reverse stock first
+    // If cancelling, reverse stock first (reads stock_movements to handle both standalone and bundle items)
     if (newStatus === "cancelled") {
-      const { data: itemsData, error: itemsErr } = await supabase
-        .from("order_items")
+      const { data: movData, error: movFetchErr } = await supabase
+        .from("stock_movements")
         .select("product_id, quantity")
-        .eq("order_id", props.orderId);
-      if (itemsErr || !itemsData) {
-        setError(itemsErr?.message ?? "讀取訂單失敗");
+        .eq("order_id", props.orderId)
+        .eq("type", "out");
+      if (movFetchErr || !movData) {
+        setError(movFetchErr?.message ?? "讀取訂單失敗");
         setSubmitting(false);
         return;
       }
       const { error: movErr } = await supabase.from("stock_movements").insert(
-        itemsData.map((item) => ({
+        movData.map((item) => ({
           product_id: item.product_id,
           type: "in" as const,
           quantity: item.quantity,
@@ -1207,29 +1304,64 @@ export function OrdersPage() {
                       </div>
                     </div>
 
-                    {/* Items */}
-                    <div class={css({ display: "flex", flexWrap: "wrap", gap: "2", mb: "2" })}>
-                      <For each={order.order_items}>
-                        {(item) => (
-                          <span
-                            class={css({
-                              bg: "gray.100",
-                              borderRadius: "md",
-                              px: "2",
-                              py: "0.5",
-                              fontSize: "sm",
-                            })}
-                          >
-                            <Show when={item.products} fallback="—">
-                              <span class={css({ fontFamily: "mono", fontSize: "xs", color: "gray.500", mr: "1" })}>
-                                [{item.products!.sku}]
+                    {/* Bundle items */}
+                    <Show when={order.order_bundles.length > 0}>
+                      <div class={css({ mb: "2" })}>
+                        <p class={css({ fontSize: "xs", color: "purple.600", fontWeight: "semibold", mb: "1" })}>組合商品</p>
+                        <div class={css({ display: "flex", flexWrap: "wrap", gap: "2" })}>
+                          <For each={order.order_bundles}>
+                            {(ob) => (
+                              <span class={css({ bg: "purple.50", border: "1px solid", borderColor: "purple.200", borderRadius: "md", px: "2", py: "0.5", fontSize: "sm" })}>
+                                <Show when={ob.bundles} fallback="—">
+                                  <span class={css({ fontFamily: "mono", fontSize: "xs", color: "purple.400", mr: "1" })}>[{ob.bundles!.sku}]</span>
+                                  {ob.bundles!.name} × {ob.quantity} 套
+                                  <span class={css({ ml: "1", color: "purple.700", fontWeight: "semibold" })}>
+                                    = ${(ob.unit_price * ob.quantity).toFixed(2)}
+                                  </span>
+                                </Show>
                               </span>
-                              {item.products!.name} × {item.quantity} {item.products!.unit}
-                            </Show>
-                          </span>
-                        )}
-                      </For>
-                    </div>
+                            )}
+                          </For>
+                        </div>
+                      </div>
+                    </Show>
+
+                    {/* Standalone items */}
+                    <Show when={order.order_items.length > 0}>
+                      <Show when={order.order_bundles.length > 0}>
+                        <p class={css({ fontSize: "xs", color: "gray.500", fontWeight: "semibold", mb: "1" })}>獨立商品</p>
+                      </Show>
+                      <div class={css({ display: "flex", flexWrap: "wrap", gap: "2", mb: "2" })}>
+                        <For each={order.order_items}>
+                          {(item) => (
+                            <span class={css({ bg: "gray.100", borderRadius: "md", px: "2", py: "0.5", fontSize: "sm" })}>
+                              <Show when={item.products} fallback="—">
+                                <span class={css({ fontFamily: "mono", fontSize: "xs", color: "gray.500", mr: "1" })}>
+                                  [{item.products!.sku}]
+                                </span>
+                                {item.products!.name} × {item.quantity} {item.products!.unit}
+                                <span class={css({ ml: "1", color: "gray.600", fontWeight: "semibold" })}>
+                                  = ${(item.products!.unit_price * item.quantity).toFixed(2)}
+                                </span>
+                              </Show>
+                            </span>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+
+                    {/* Order total */}
+                    <Show when={order.order_bundles.length > 0 || order.order_items.length > 0}>
+                      {(() => {
+                        const bundleTotal = order.order_bundles.reduce((s, ob) => s + ob.unit_price * ob.quantity, 0);
+                        const itemTotal = order.order_items.reduce((s, oi) => s + (oi.products?.unit_price ?? 0) * oi.quantity, 0);
+                        return (
+                          <p class={css({ fontSize: "sm", fontWeight: "bold", color: "gray.800", textAlign: "right" })}>
+                            合計：${(bundleTotal + itemTotal).toFixed(2)}
+                          </p>
+                        );
+                      })()}
+                    </Show>
 
                     <Show when={order.note}>
                       <p class={css({ fontSize: "xs", color: "gray.500" })}>備註：{order.note}</p>

@@ -95,6 +95,7 @@ function BundleDialog(props: BundleDialogProps) {
   const [sku, setSku] = createSignal(props.bundle?.sku ?? "");
   const [name, setName] = createSignal(props.bundle?.name ?? "");
   const [description, setDescription] = createSignal(props.bundle?.description ?? "");
+  const [price, setPrice] = createSignal(props.bundle?.price ?? 0);
   const [isActive, setIsActive] = createSignal(props.bundle?.is_active ?? true);
   const [items, setItems] = createSignal<BundleItem[]>(
     props.bundle?.bundle_items.map((bi) => ({ productId: bi.products?.id ?? "", quantity: bi.quantity })) ??
@@ -138,7 +139,7 @@ function BundleDialog(props: BundleDialogProps) {
       // Update bundle
       const { error: bundleErr } = await supabase
         .from("bundles")
-        .update({ sku: sku(), name: name(), description: description() || null, is_active: isActive() })
+        .update({ sku: sku(), name: name(), description: description() || null, price: price(), is_active: isActive() })
         .eq("id", props.bundle!.id);
       if (bundleErr) {
         setError(bundleErr.message);
@@ -169,7 +170,7 @@ function BundleDialog(props: BundleDialogProps) {
       // Insert bundle
       const { data: bundleData, error: bundleErr } = await supabase
         .from("bundles")
-        .insert({ sku: sku(), name: name(), description: description() || null, is_active: isActive() } as BundleInsert)
+        .insert({ sku: sku(), name: name(), description: description() || null, price: price(), is_active: isActive() } as BundleInsert)
         .select("id")
         .single();
       if (bundleErr || !bundleData) {
@@ -237,9 +238,24 @@ function BundleDialog(props: BundleDialogProps) {
             </div>
           </div>
 
-          <div class={fieldGroup}>
-            <label class={label}>描述（選填）</label>
-            <input type="text" value={description()} onInput={(e) => setDescription(e.currentTarget.value)} class={input} placeholder="描述說明..." />
+          <div class={css({ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3" })}>
+            <div class={fieldGroup}>
+              <label class={label}>套組單價 *</label>
+              <input
+                type="number"
+                required
+                min="0"
+                step="0.01"
+                value={price()}
+                onInput={(e) => setPrice(parseFloat(e.currentTarget.value) || 0)}
+                class={input}
+                placeholder="0.00"
+              />
+            </div>
+            <div class={fieldGroup}>
+              <label class={label}>描述（選填）</label>
+              <input type="text" value={description()} onInput={(e) => setDescription(e.currentTarget.value)} class={input} placeholder="描述說明..." />
+            </div>
           </div>
 
           <div class={fieldGroup}>
@@ -415,6 +431,9 @@ export function BundlesPage() {
                       <div class={css({ display: "flex", alignItems: "center", gap: "2", mb: "1" })}>
                         <span class={css({ fontFamily: "mono", fontSize: "sm", color: "gray.500" })}>{bundle.sku}</span>
                         <span class={css({ fontWeight: "bold", fontSize: "md" })}>{bundle.name}</span>
+                        <span class={css({ fontSize: "sm", color: "blue.700", fontWeight: "semibold" })}>
+                          ${bundle.price.toFixed(2)} / 套
+                        </span>
                         <span
                           class={css({
                             px: "2",
