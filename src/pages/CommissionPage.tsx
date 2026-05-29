@@ -6,6 +6,7 @@ import type {
   Product,
   CollaborationProjectInsert,
   CollaborationProjectProductInsert,
+  CollaborationProjectBundleInsert,
 } from "../lib/database.types";
 import { css } from "../../styled-system/css";
 
@@ -41,6 +42,26 @@ interface ProjMovementRow {
   id: string;
   product_id: string;
   quantity: number;
+}
+
+interface ProjBundleRow {
+  id: string;
+  project_id: string;
+  bundle_id: string;
+  commission_rate: number;
+  bundles: { id: string; sku: string; name: string; price: number } | null;
+}
+
+interface BundleOrderRow {
+  bundle_id: string;
+  quantity: number;
+}
+
+interface BundleSimple {
+  id: string;
+  sku: string;
+  name: string;
+  price: number;
 }
 
 // ─── Data fetchers ───────────────────────────────────────────────────────────
@@ -103,6 +124,41 @@ async function fetchProjectMovements(projectId: string): Promise<ProjMovementRow
   return data ?? [];
 }
 
+async function fetchActiveBundles(): Promise<BundleSimple[]> {
+  const { data, error } = await supabase
+    .from("bundles")
+    .select("id, sku, name, price")
+    .eq("is_active", true)
+    .order("name");
+  if (error) throw error;
+  return data ?? [];
+}
+
+async function fetchProjectBundles(projectId: string): Promise<ProjBundleRow[]> {
+  const { data, error } = await supabase
+    .from("collaboration_project_bundles")
+    .select("*, bundles(id, sku, name, price)")
+    .eq("project_id", projectId);
+  if (error) throw error;
+  return (data ?? []) as ProjBundleRow[];
+}
+
+async function fetchProjectBundleOrders(projectId: string): Promise<BundleOrderRow[]> {
+  const { data: orderData, error: orderErr } = await supabase
+    .from("orders")
+    .select("id")
+    .eq("project_id", projectId)
+    .neq("status", "cancelled");
+  if (orderErr || !orderData || orderData.length === 0) return [];
+  const orderIds = orderData.map((o) => o.id);
+  const { data, error } = await supabase
+    .from("order_bundles")
+    .select("bundle_id, quantity")
+    .in("order_id", orderIds);
+  if (error) throw error;
+  return data ?? [];
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 export function CommissionPage() {
@@ -140,7 +196,7 @@ export function CommissionPage() {
 
   // Add product to expanded project form
   const [showAddProd, setShowAddProd] = createSignal(false);
-  const [addProdProductId, setAddProdProductId] = createSignal("");
+  const [addProdItemId, setAddProdItemId] = createSignal("");
   const [addProdRate, setAddProdRate] = createSignal(10);
   const [addProdError, setAddProdError] = createSignal("");
   const [addProdSuccess, setAddProdSuccess] = createSignal("");
@@ -155,6 +211,11 @@ export function CommissionPage() {
   const [allProducts] = createResource(
     () => isAdmin(),
     (isA) => (isA ? fetchAllProducts() : Promise.resolve([] as Product[]))
+  );
+
+  const [allBundles] = createResource(
+    () => isAdmin(),
+    (isA) => (isA ? fetchActiveBundles() : Promise.resolve([] as BundleSimple[]))
   );
 
   const projectsKey = createMemo(() => ({
@@ -195,9 +256,19 @@ export function CommissionPage() {
     (id) => (id ? fetchProjectProducts(id) : Promise.resolve([] as ProjProductRow[]))
   );
 
+  const [projBundles, { refetch: refetchProjBundles }] = createResource(
+    expandedProjectId,
+    (id) => (id ? fetchProjectBundles(id) : Promise.resolve([] as ProjBundleRow[]))
+  );
+
   const [projMovements] = createResource(
     expandedProjectId,
     (id) => (id ? fetchProjectMovements(id) : Promise.resolve([] as ProjMovementRow[]))
+  );
+
+  const [projBundleOrders] = createResource(
+    expandedProjectId,
+    (id) => (id ? fetchProjectBundleOrders(id) : Promise.resolve([] as BundleOrderRow[]))
   );
 
   const totalCommission = createMemo(() => {
@@ -211,6 +282,20 @@ export function CommissionPage() {
       return sum + qty * pp.products.unit_price * pp.commission_rate;
     }, 0);
   });
+
+  const totalBundleCommission = createMemo(() => {
+    const pbs = projBundles() ?? [];
+    const bos = projBundleOrders() ?? [];
+    return pbs.reduce((sum, pb) => {
+      if (!pb.bundles) return sum;
+      const qty = bos
+        .filter((bo) => bo.bundle_id === pb.bundle_id)
+        .reduce((s, bo) => s + bo.quantity, 0);
+      return sum + qty * pb.bundles.price * pb.commission_rate;
+    }, 0);
+  });
+
+  const grandTotalCommission = createMemo(() => totalCommission() + totalBundleCommission());
 
   const filteredProjects = createMemo(() => {
     const all = projects() ?? [];
@@ -230,7 +315,7 @@ export function CommissionPage() {
     } else {
       setExpandedProjectId(projectId);
       setShowAddProd(false);
-      setAddProdProductId("");
+      setAddProdItemId("");
       setAddProdRate(10);
       setAddProdError("");
       setAddProdSuccess("");
@@ -243,11 +328,13 @@ export function CommissionPage() {
 
     const pps = projProducts() ?? [];
     const mvs = projMovements() ?? [];
+    const pbs = projBundles() ?? [];
+    const bos = projBundleOrders() ?? [];
     const partnerName = project.profiles
       ? esc(project.profiles.display_name ?? project.profiles.email)
       : esc(project.partner_id);
 
-    const rows = pps
+    const productRows = pps
       .filter((pp) => pp.products)
       .map((pp) => {
         const qty = mvs
@@ -261,6 +348,29 @@ export function CommissionPage() {
           <td>$${pp.products!.unit_price.toFixed(2)}</td>
           <td>${qty}</td>
           <td>${(pp.commission_rate * 100).toFixed(1)}%</td>
+          <td>$${subtotal.toFixed(2)}</td>
+        </tr>`;
+      })
+      .join("");
+
+    const bundleSectionHeader = pbs.filter((pb) => pb.bundles).length > 0
+      ? `<tr><td colspan="7" style="background:#f5f3ff;font-weight:600;color:#6d28d9;padding:8px 12px">組合商品</td></tr>`
+      : "";
+
+    const bundleRows = pbs
+      .filter((pb) => pb.bundles)
+      .map((pb) => {
+        const qty = bos
+          .filter((bo) => bo.bundle_id === pb.bundle_id)
+          .reduce((s, bo) => s + bo.quantity, 0);
+        const subtotal = qty * pb.bundles!.price * pb.commission_rate;
+        return `<tr>
+          <td>${esc(pb.bundles!.sku)}</td>
+          <td>${esc(pb.bundles!.name)}</td>
+          <td>套</td>
+          <td>$${pb.bundles!.price.toFixed(2)}</td>
+          <td>${qty}</td>
+          <td>${(pb.commission_rate * 100).toFixed(1)}%</td>
           <td>$${subtotal.toFixed(2)}</td>
         </tr>`;
       })
@@ -296,11 +406,11 @@ export function CommissionPage() {
         <th>SKU</th><th>\u5546\u54c1\u540d\u7a31</th><th>\u55ae\u4f4d</th><th>\u55ae\u50f9</th><th>\u51fa\u8ca8\u91cf</th><th>\u5206\u6f64%</th><th>\u5c0f\u8a08</th>
       </tr>
     </thead>
-    <tbody>${rows}</tbody>
+    <tbody>${productRows}${bundleSectionHeader}${bundleRows}</tbody>
     <tfoot>
       <tr>
         <td colspan="6" style="text-align:right">\u7e3d\u8a08\u5206\u6f64</td>
-        <td>$${totalCommission().toFixed(2)}</td>
+        <td>$${grandTotalCommission().toFixed(2)}</td>
       </tr>
     </tfoot>
   </table>
@@ -388,24 +498,47 @@ export function CommissionPage() {
     setAddProdSuccess("");
     setAddProdSubmitting(true);
 
-    const payload: CollaborationProjectProductInsert = {
-      project_id: projId,
-      product_id: addProdProductId(),
-      commission_rate: addProdRate() / 100,
-    };
+    const itemId = addProdItemId();
+    const colonIdx = itemId.indexOf(":");
+    const type = itemId.slice(0, colonIdx);
+    const id = itemId.slice(colonIdx + 1);
 
-    const { error } = await supabase
-      .from("collaboration_project_products")
-      .upsert(payload, { onConflict: "project_id,product_id" });
-
-    if (error) {
-      setAddProdError(error.message);
-    } else {
-      setAddProdSuccess("已新增商品");
-      setAddProdProductId("");
-      setAddProdRate(10);
-      refetchProjProducts();
+    if (type === "p") {
+      const payload: CollaborationProjectProductInsert = {
+        project_id: projId,
+        product_id: id,
+        commission_rate: addProdRate() / 100,
+      };
+      const { error } = await supabase
+        .from("collaboration_project_products")
+        .upsert(payload, { onConflict: "project_id,product_id" });
+      if (error) {
+        setAddProdError(error.message);
+      } else {
+        setAddProdSuccess("已新增商品");
+        setAddProdItemId("");
+        setAddProdRate(10);
+        refetchProjProducts();
+      }
+    } else if (type === "b") {
+      const payload: CollaborationProjectBundleInsert = {
+        project_id: projId,
+        bundle_id: id,
+        commission_rate: addProdRate() / 100,
+      };
+      const { error } = await supabase
+        .from("collaboration_project_bundles")
+        .upsert(payload, { onConflict: "project_id,bundle_id" });
+      if (error) {
+        setAddProdError(error.message);
+      } else {
+        setAddProdSuccess("已新增組合商品");
+        setAddProdItemId("");
+        setAddProdRate(10);
+        refetchProjBundles();
+      }
     }
+
     setAddProdSubmitting(false);
   };
 
@@ -421,6 +554,11 @@ export function CommissionPage() {
   const handleRemoveProjProduct = async (ppId: string) => {
     await supabase.from("collaboration_project_products").delete().eq("id", ppId);
     refetchProjProducts();
+  };
+
+  const handleRemoveProjBundle = async (pbId: string) => {
+    await supabase.from("collaboration_project_bundles").delete().eq("id", pbId);
+    refetchProjBundles();
   };
 
   // ── JSX ────────────────────────────────────────────────────────
@@ -559,16 +697,16 @@ export function CommissionPage() {
                   {/* Expanded detail */}
                   <Show when={isExpanded()}>
                     <div class={projectDetail}>
-                      <Show when={projProducts.loading || projMovements.loading}>
+                      <Show when={projProducts.loading || projMovements.loading || projBundles.loading || projBundleOrders.loading}>
                         <p class={loadingText}>載入中...</p>
                       </Show>
 
-                      <Show when={!projProducts.loading && !projMovements.loading}>
-                        <Show when={(projProducts() ?? []).length === 0}>
+                      <Show when={!projProducts.loading && !projMovements.loading && !projBundles.loading && !projBundleOrders.loading}>
+                        <Show when={(projProducts() ?? []).length === 0 && (projBundles() ?? []).length === 0}>
                           <p class={emptyText}>此專案尚未指定商品</p>
                         </Show>
 
-                        <Show when={(projProducts() ?? []).length > 0}>
+                        <Show when={(projProducts() ?? []).length > 0 || (projBundles() ?? []).length > 0}>
                           <div class={css({ overflowX: "auto" })}>
                             <table class={table}>
                               <thead>
@@ -586,56 +724,126 @@ export function CommissionPage() {
                                 </tr>
                               </thead>
                               <tbody>
-                                <For each={projProducts()}>
-                                  {(pp) => {
-                                    if (!pp.products) return null;
-                                    const qty = (projMovements() ?? [])
-                                      .filter((m) => m.product_id === pp.product_id)
-                                      .reduce((s, m) => s + m.quantity, 0);
-                                    const subtotal =
-                                      qty * pp.products.unit_price * pp.commission_rate;
-                                    return (
-                                      <tr class={css({ _hover: { bg: "gray.50" } })}>
-                                        <td class={td}>
-                                          <span
-                                            class={css({ fontFamily: "mono", fontSize: "xs" })}
-                                          >
-                                            {pp.products.sku}
-                                          </span>
-                                        </td>
-                                        <td class={td}>{pp.products.name}</td>
-                                        <td class={td}>{pp.products.unit}</td>
-                                        <td class={td}>
-                                          ${pp.products.unit_price.toFixed(2)}
-                                        </td>
-                                        <td class={td}>{qty}</td>
-                                        <td class={td}>
-                                          {(pp.commission_rate * 100).toFixed(1)}%
-                                        </td>
-                                        <td class={td}>
-                                          <span
-                                            class={css({
-                                              fontWeight: "semibold",
-                                              color: "blue.700",
-                                            })}
-                                          >
-                                            ${subtotal.toFixed(2)}
-                                          </span>
-                                        </td>
-                                        <Show when={isAdmin()}>
+                                <Show when={(projProducts() ?? []).length > 0}>
+                                  <For each={projProducts()}>
+                                    {(pp) => {
+                                      if (!pp.products) return null;
+                                      const qty = (projMovements() ?? [])
+                                        .filter((m) => m.product_id === pp.product_id)
+                                        .reduce((s, m) => s + m.quantity, 0);
+                                      const subtotal =
+                                        qty * pp.products.unit_price * pp.commission_rate;
+                                      return (
+                                        <tr class={css({ _hover: { bg: "gray.50" } })}>
                                           <td class={td}>
-                                            <button
-                                              class={removeBtnSmall}
-                                              onClick={() => handleRemoveProjProduct(pp.id)}
+                                            <span
+                                              class={css({ fontFamily: "mono", fontSize: "xs" })}
                                             >
-                                              移除
-                                            </button>
+                                              {pp.products.sku}
+                                            </span>
                                           </td>
-                                        </Show>
-                                      </tr>
-                                    );
-                                  }}
-                                </For>
+                                          <td class={td}>{pp.products.name}</td>
+                                          <td class={td}>{pp.products.unit}</td>
+                                          <td class={td}>
+                                            ${pp.products.unit_price.toFixed(2)}
+                                          </td>
+                                          <td class={td}>{qty}</td>
+                                          <td class={td}>
+                                            {(pp.commission_rate * 100).toFixed(1)}%
+                                          </td>
+                                          <td class={td}>
+                                            <span
+                                              class={css({
+                                                fontWeight: "semibold",
+                                                color: "blue.700",
+                                              })}
+                                            >
+                                              ${subtotal.toFixed(2)}
+                                            </span>
+                                          </td>
+                                          <Show when={isAdmin()}>
+                                            <td class={td}>
+                                              <button
+                                                class={removeBtnSmall}
+                                                onClick={() => handleRemoveProjProduct(pp.id)}
+                                              >
+                                                移除
+                                              </button>
+                                            </td>
+                                          </Show>
+                                        </tr>
+                                      );
+                                    }}
+                                  </For>
+                                </Show>
+
+                                <Show when={(projBundles() ?? []).length > 0}>
+                                  <tr>
+                                    <td
+                                      colSpan={isAdmin() ? 8 : 7}
+                                      class={css({
+                                        ...tdStyles,
+                                        bg: "purple.50",
+                                        color: "purple.700",
+                                        fontWeight: "semibold",
+                                        fontSize: "xs",
+                                        letterSpacing: "wide",
+                                      })}
+                                    >
+                                      組合商品
+                                    </td>
+                                  </tr>
+                                  <For each={projBundles()}>
+                                    {(pb) => {
+                                      if (!pb.bundles) return null;
+                                      const qty = (projBundleOrders() ?? [])
+                                        .filter((bo) => bo.bundle_id === pb.bundle_id)
+                                        .reduce((s, bo) => s + bo.quantity, 0);
+                                      const subtotal =
+                                        qty * pb.bundles.price * pb.commission_rate;
+                                      return (
+                                        <tr class={css({ _hover: { bg: "purple.50" } })}>
+                                          <td class={td}>
+                                            <span
+                                              class={css({ fontFamily: "mono", fontSize: "xs" })}
+                                            >
+                                              {pb.bundles.sku}
+                                            </span>
+                                          </td>
+                                          <td class={td}>{pb.bundles.name}</td>
+                                          <td class={td}>套</td>
+                                          <td class={td}>
+                                            ${pb.bundles.price.toFixed(2)}
+                                          </td>
+                                          <td class={td}>{qty}</td>
+                                          <td class={td}>
+                                            {(pb.commission_rate * 100).toFixed(1)}%
+                                          </td>
+                                          <td class={td}>
+                                            <span
+                                              class={css({
+                                                fontWeight: "semibold",
+                                                color: "purple.700",
+                                              })}
+                                            >
+                                              ${subtotal.toFixed(2)}
+                                            </span>
+                                          </td>
+                                          <Show when={isAdmin()}>
+                                            <td class={td}>
+                                              <button
+                                                class={removeBtnSmall}
+                                                onClick={() => handleRemoveProjBundle(pb.id)}
+                                              >
+                                                移除
+                                              </button>
+                                            </td>
+                                          </Show>
+                                        </tr>
+                                      );
+                                    }}
+                                  </For>
+                                </Show>
                               </tbody>
                               <tfoot>
                                 <tr>
@@ -660,7 +868,7 @@ export function CommissionPage() {
                                       bg: "gray.50",
                                     })}
                                   >
-                                    ${totalCommission().toFixed(2)}
+                                    ${grandTotalCommission().toFixed(2)}
                                   </td>
                                   <Show when={isAdmin()}>
                                     <td class={css({ ...tdStyles, bg: "gray.50" })}></td>
@@ -740,23 +948,34 @@ export function CommissionPage() {
                               </Show>
                               <div class={formRow}>
                                 <div class={fieldGroup}>
-                                  <label class={label}>選擇商品</label>
+                                  <label class={label}>選擇商品或組合</label>
                                   <select
                                     required
-                                    value={addProdProductId()}
+                                    value={addProdItemId()}
                                     onChange={(e) =>
-                                      setAddProdProductId(e.currentTarget.value)
+                                      setAddProdItemId(e.currentTarget.value)
                                     }
                                     class={select}
                                   >
-                                    <option value="">-- 請選擇商品 --</option>
-                                    <For each={allProducts()}>
-                                      {(p) => (
-                                        <option value={p.id}>
-                                          [{p.sku}] {p.name}
-                                        </option>
-                                      )}
-                                    </For>
+                                    <option value="">-- 請選擇商品或組合 --</option>
+                                    <optgroup label="獨立商品">
+                                      <For each={allProducts()}>
+                                        {(p) => (
+                                          <option value={`p:${p.id}`}>
+                                            [{p.sku}] {p.name}
+                                          </option>
+                                        )}
+                                      </For>
+                                    </optgroup>
+                                    <optgroup label="組合商品">
+                                      <For each={allBundles()}>
+                                        {(b) => (
+                                          <option value={`b:${b.id}`}>
+                                            [{b.sku}] {b.name}（${b.price.toFixed(2)}/套）
+                                          </option>
+                                        )}
+                                      </For>
+                                    </optgroup>
                                   </select>
                                 </div>
                                 <div class={fieldGroup}>

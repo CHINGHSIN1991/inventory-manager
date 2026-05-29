@@ -112,6 +112,27 @@ export type Database = {
         };
         Relationships: [];
       };
+      collaboration_project_bundles: {
+        Row: {
+          id: string;
+          project_id: string;
+          bundle_id: string;
+          commission_rate: number;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          bundle_id: string;
+          commission_rate?: number;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          bundle_id?: string;
+          commission_rate?: number;
+        };
+        Relationships: [];
+      };
       collaboration_project_products: {
         Row: {
           id: string;
@@ -318,6 +339,8 @@ export type CollaborationProjectInsert = Database["public"]["Tables"]["collabora
 export type CollaborationProjectUpdate = Database["public"]["Tables"]["collaboration_projects"]["Update"];
 export type CollaborationProjectProduct = Database["public"]["Tables"]["collaboration_project_products"]["Row"];
 export type CollaborationProjectProductInsert = Database["public"]["Tables"]["collaboration_project_products"]["Insert"];
+export type CollaborationProjectBundle = Database["public"]["Tables"]["collaboration_project_bundles"]["Row"];
+export type CollaborationProjectBundleInsert = Database["public"]["Tables"]["collaboration_project_bundles"]["Insert"];
 export type Order = Database["public"]["Tables"]["orders"]["Row"];
 export type OrderInsert = Database["public"]["Tables"]["orders"]["Insert"];
 export type OrderItem = Database["public"]["Tables"]["order_items"]["Row"];

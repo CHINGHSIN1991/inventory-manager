@@ -333,6 +333,24 @@ CREATE POLICY "Partner can view own collaboration_project_products"
     )
   );
 
+-- ── collaboration_project_bundles ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.collaboration_project_bundles (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL REFERENCES public.collaboration_projects(id) ON DELETE CASCADE,
+  bundle_id uuid NOT NULL REFERENCES public.bundles(id) ON DELETE RESTRICT,
+  commission_rate numeric(5,4) NOT NULL DEFAULT 0.1,
+  UNIQUE (project_id, bundle_id)
+);
+ALTER TABLE public.collaboration_project_bundles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Authenticated can view collaboration_project_bundles" ON public.collaboration_project_bundles;
+CREATE POLICY "Authenticated can view collaboration_project_bundles"
+  ON public.collaboration_project_bundles FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Admin can manage collaboration_project_bundles" ON public.collaboration_project_bundles;
+CREATE POLICY "Admin can manage collaboration_project_bundles"
+  ON public.collaboration_project_bundles FOR ALL TO authenticated
+  USING (public.get_user_role() = 'admin')
+  WITH CHECK (public.get_user_role() = 'admin');
+
 -- ============================================
 -- Orders (出貨單)
 -- ============================================
